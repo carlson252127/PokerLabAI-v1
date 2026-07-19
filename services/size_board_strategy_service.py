@@ -390,9 +390,98 @@ class SizeBoardStrategyService:
                 GROUP BY hand_id, street
             ),
 
+            action_flow AS (
+                SELECT
+                    a.hand_id,
+                    a.sequence_no,
+                    UPPER(TRIM(a.street)) AS street,
+                    a.player_name,
+                    UPPER(TRIM(a.action)) AS action,
+                    a.amount,
+                    a.to_amount,
+                    COALESCE(
+                        SUM(
+                            CASE
+                                WHEN UPPER(TRIM(a.action)) IN (
+                                    'POST_ANTE', 'POST_SB', 'POST_BB',
+                                    'CALL', 'BET', 'RAISE'
+                                )
+                                THEN COALESCE(a.amount, 0)
+                                WHEN UPPER(TRIM(a.action)) = 'RETURN'
+                                THEN -COALESCE(a.amount, 0)
+                                ELSE 0
+                            END
+                        ) OVER (
+                            PARTITION BY a.hand_id
+                            ORDER BY a.sequence_no
+                            ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+                        ),
+                        0
+                    ) AS pot_before
+                FROM actions a
+            ),
+
+            opener_street_bets AS (
+                SELECT
+                    o.hand_id,
+                    af.street,
+                    af.amount AS bet_amount,
+                    af.pot_before,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY o.hand_id, af.street
+                        ORDER BY af.sequence_no
+                    ) AS bet_no
+                FROM opens o
+                JOIN action_flow af
+                  ON af.hand_id = o.hand_id
+                 AND af.player_name = o.opener
+                WHERE af.street IN ('FLOP', 'TURN', 'RIVER')
+                  AND af.action = 'BET'
+                  AND af.amount IS NOT NULL
+                  AND af.amount > 0
+                  AND af.pot_before > 0
+            ),
+
+            street_bet_metrics AS (
+                SELECT
+                    hand_id,
+                    MAX(CASE
+                        WHEN street = 'FLOP' AND bet_no = 1
+                        THEN bet_amount
+                    END) AS flop_bet_amount,
+                    MAX(CASE
+                        WHEN street = 'FLOP' AND bet_no = 1
+                        THEN pot_before
+                    END) AS flop_pot_before,
+                    MAX(CASE
+                        WHEN street = 'TURN' AND bet_no = 1
+                        THEN bet_amount
+                    END) AS turn_bet_amount,
+                    MAX(CASE
+                        WHEN street = 'TURN' AND bet_no = 1
+                        THEN pot_before
+                    END) AS turn_pot_before,
+                    MAX(CASE
+                        WHEN street = 'RIVER' AND bet_no = 1
+                        THEN bet_amount
+                    END) AS river_bet_amount,
+                    MAX(CASE
+                        WHEN street = 'RIVER' AND bet_no = 1
+                        THEN pot_before
+                    END) AS river_pot_before
+                FROM opener_street_bets
+                GROUP BY hand_id
+            ),
+
             flags AS (
                 SELECT
                     o.*,
+                    sbm.flop_bet_amount,
+                    sbm.flop_pot_before,
+                    sbm.turn_bet_amount,
+                    sbm.turn_pot_before,
+                    sbm.river_bet_amount,
+                    sbm.river_pot_before,
 
                     CASE
                         WHEN lpr.player_name = o.opener
@@ -495,6 +584,9 @@ class SizeBoardStrategyService:
                 LEFT JOIN street_meta sm_r
                   ON sm_r.hand_id = o.hand_id
                  AND sm_r.street = 'RIVER'
+
+                LEFT JOIN street_bet_metrics sbm
+                  ON sbm.hand_id = o.hand_id
             )
 
             SELECT
@@ -513,7 +605,13 @@ class SizeBoardStrategyService:
                 river_barrel_opp,
                 river_barrel_made,
                 won_pot,
-                went_showdown
+                went_showdown,
+                flop_bet_amount,
+                flop_pot_before,
+                turn_bet_amount,
+                turn_pot_before,
+                river_bet_amount,
+                river_pot_before
             FROM flags
         """
 
@@ -543,6 +641,12 @@ class SizeBoardStrategyService:
                 river_made,
                 won_pot,
                 went_showdown,
+                flop_bet_amount,
+                flop_pot_before,
+                turn_bet_amount,
+                turn_pot_before,
+                river_bet_amount,
+                river_pot_before,
             ) = raw
 
             bb = self._parse_big_blind(
@@ -582,6 +686,24 @@ class SizeBoardStrategyService:
                     "river_barrel_made": bool(river_made),
                     "won_pot": bool(won_pot),
                     "went_showdown": bool(went_showdown),
+                    "flop_bet_amount": self._float_or_none(flop_bet_amount),
+                    "flop_pot_before": self._float_or_none(flop_pot_before),
+                    "flop_bet_pct": self._bet_pct(
+                        flop_bet_amount,
+                        flop_pot_before,
+                    ),
+                    "turn_bet_amount": self._float_or_none(turn_bet_amount),
+                    "turn_pot_before": self._float_or_none(turn_pot_before),
+                    "turn_bet_pct": self._bet_pct(
+                        turn_bet_amount,
+                        turn_pot_before,
+                    ),
+                    "river_bet_amount": self._float_or_none(river_bet_amount),
+                    "river_pot_before": self._float_or_none(river_pot_before),
+                    "river_bet_pct": self._bet_pct(
+                        river_bet_amount,
+                        river_pot_before,
+                    ),
                 }
             )
 
@@ -714,9 +836,30 @@ class SizeBoardStrategyService:
                     showdown,
                 ),
                 "wsd_sample": showdown,
-                "flop_avg_bet_pct": 0.0,
-                "turn_avg_bet_pct": 0.0,
-                "river_avg_bet_pct": 0.0,
+                "flop_avg_bet_pct": self._average_metric(
+                    items,
+                    "flop_bet_pct",
+                ),
+                "turn_avg_bet_pct": self._average_metric(
+                    items,
+                    "turn_bet_pct",
+                ),
+                "river_avg_bet_pct": self._average_metric(
+                    items,
+                    "river_bet_pct",
+                ),
+                "flop_bet_size_sample": self._metric_sample(
+                    items,
+                    "flop_bet_pct",
+                ),
+                "turn_bet_size_sample": self._metric_sample(
+                    items,
+                    "turn_bet_pct",
+                ),
+                "river_bet_size_sample": self._metric_sample(
+                    items,
+                    "river_bet_pct",
+                ),
                 "representative_board": self._representative_board(items),
                 "representative_board_hands": self._representative_board_count(items),
                 "representative_boards": self._representative_boards(items),
@@ -1212,6 +1355,51 @@ class SizeBoardStrategyService:
                 100.0,
                 numerator / denominator * 100.0,
             ),
+        )
+
+    def _bet_pct(
+        self,
+        bet_amount: Any,
+        pot_before: Any,
+    ) -> float | None:
+        bet = self._float_or_none(bet_amount)
+        pot = self._float_or_none(pot_before)
+
+        if bet is None or pot is None or bet <= 0 or pot <= 0:
+            return None
+
+        value = bet / pot * 100.0
+
+        # Gerçek all-in overbet'ler %100'ü aşabilir. Çok uç değerler ise
+        # genellikle bozuk hand-history miktarına işaret eder.
+        if not math.isfinite(value) or value > 1000.0:
+            return None
+
+        return value
+
+    def _average_metric(
+        self,
+        items: list[dict[str, Any]],
+        key: str,
+    ) -> float:
+        values = [
+            float(item[key])
+            for item in items
+            if item.get(key) is not None
+            and math.isfinite(float(item[key]))
+        ]
+        return sum(values) / len(values) if values else 0.0
+
+    def _metric_sample(
+        self,
+        items: list[dict[str, Any]],
+        key: str,
+    ) -> int:
+        return sum(
+            1
+            for item in items
+            if item.get(key) is not None
+            and math.isfinite(float(item[key]))
         )
 
     def _float_or_none(
