@@ -831,6 +831,11 @@ class SizeBoardStrategyService:
                     saw_flop,
                 ),
                 "wwsf_sample": saw_flop,
+                "wtsd": self._pct(
+                    showdown,
+                    saw_flop,
+                ),
+                "wtsd_sample": saw_flop,
                 "wsd": self._pct(
                     showdown_wins,
                     showdown,
@@ -863,8 +868,13 @@ class SizeBoardStrategyService:
                 "representative_board": self._representative_board(items),
                 "representative_board_hands": self._representative_board_count(items),
                 "representative_boards": self._representative_boards(items),
-                "size_dna": self._size_dna(items),
+                "flop_size_distribution": self._size_distribution(items, "flop_bet_pct"),
+                "turn_size_distribution": self._size_distribution(items, "turn_bet_pct"),
+                "river_size_distribution": self._size_distribution(items, "river_bet_pct"),
             }
+
+            row["size_dna_data"] = self._size_dna_data(row, items)
+            row["size_dna"] = self._format_size_dna(row["size_dna_data"])
 
             row["strategy_vector"] = (
                 f"F {row['flop_cbet']:.0f}"
@@ -1295,12 +1305,92 @@ class SizeBoardStrategyService:
             for board, count in sorted(counts.items(), key=lambda pair: (-pair[1], pair[0]))[:5]
         ]
 
-    def _size_dna(self, items: list[dict[str, Any]]) -> str:
-        sizes = [float(item["size_bb"]) for item in items if item.get("size_bb") is not None]
-        if not sizes:
+    def _size_distribution(
+        self,
+        items: list[dict[str, Any]],
+        key: str,
+    ) -> list[dict[str, Any]]:
+        """Return stable pot-percentage buckets for a street."""
+        labels = (
+            ("≤25%", 0.0, 25.0),
+            ("26–40%", 25.0, 40.0),
+            ("41–60%", 40.0, 60.0),
+            ("61–80%", 60.0, 80.0),
+            ("81–100%", 80.0, 100.0),
+            ("101–125%", 100.0, 125.0),
+            (">125%", 125.0, float("inf")),
+        )
+        values = [
+            float(item[key])
+            for item in items
+            if item.get(key) is not None
+            and math.isfinite(float(item[key]))
+            and float(item[key]) > 0
+        ]
+        total = len(values)
+        result: list[dict[str, Any]] = []
+        for label, lower, upper in labels:
+            count = sum(
+                1 for value in values
+                if value > lower and value <= upper
+            )
+            result.append({
+                "bucket": label,
+                "count": count,
+                "pct": self._pct(count, total),
+            })
+        return result
+
+    def _size_dna_data(
+        self,
+        row: dict[str, Any],
+        items: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        sizes = [
+            float(item["size_bb"])
+            for item in items
+            if item.get("size_bb") is not None
+            and math.isfinite(float(item["size_bb"]))
+        ]
+        return {
+            "open_avg_bb": sum(sizes) / len(sizes) if sizes else 0.0,
+            "open_min_bb": min(sizes) if sizes else 0.0,
+            "open_max_bb": max(sizes) if sizes else 0.0,
+            "flop_frequency": float(row.get("flop_cbet") or 0.0),
+            "flop_avg_bet_pct": float(row.get("flop_avg_bet_pct") or 0.0),
+            "flop_size_sample": int(row.get("flop_bet_size_sample") or 0),
+            "turn_frequency": float(row.get("turn_barrel") or 0.0),
+            "turn_avg_bet_pct": float(row.get("turn_avg_bet_pct") or 0.0),
+            "turn_size_sample": int(row.get("turn_bet_size_sample") or 0),
+            "river_frequency": float(row.get("river_barrel") or 0.0),
+            "river_avg_bet_pct": float(row.get("river_avg_bet_pct") or 0.0),
+            "river_size_sample": int(row.get("river_bet_size_sample") or 0),
+            "wwsf": float(row.get("wwsf") or 0.0),
+            "wtsd": float(row.get("wtsd") or 0.0),
+            "wsd": float(row.get("wsd") or 0.0),
+            "hands": int(row.get("hands") or 0),
+        }
+
+    def _format_size_dna(self, dna: dict[str, Any]) -> str:
+        if int(dna.get("hands") or 0) <= 0:
             return "Size verisi yok"
-        avg = sum(sizes) / len(sizes)
-        return f"Ort {avg:.2f}x • Min {min(sizes):.2f}x • Max {max(sizes):.2f}x"
+
+        def street(label: str, frequency_key: str, size_key: str, sample_key: str) -> str:
+            frequency = float(dna.get(frequency_key) or 0.0)
+            avg_size = float(dna.get(size_key) or 0.0)
+            sample = int(dna.get(sample_key) or 0)
+            size_text = f"{avg_size:.0f}%" if sample > 0 else "—"
+            return f"{label} {frequency:.0f}%@{size_text}"
+
+        return (
+            f"Open {float(dna.get('open_avg_bb') or 0.0):.2f}x"
+            f" • {street('F', 'flop_frequency', 'flop_avg_bet_pct', 'flop_size_sample')}"
+            f" • {street('T', 'turn_frequency', 'turn_avg_bet_pct', 'turn_size_sample')}"
+            f" • {street('R', 'river_frequency', 'river_avg_bet_pct', 'river_size_sample')}"
+            f" • WWSF {float(dna.get('wwsf') or 0.0):.0f}"
+            f" • WTSD {float(dna.get('wtsd') or 0.0):.0f}"
+            f" • W$SD {float(dna.get('wsd') or 0.0):.0f}"
+        )
 
     def _parse_big_blind(
         self,
