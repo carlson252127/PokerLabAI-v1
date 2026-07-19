@@ -1,0 +1,22 @@
+[
+  {
+    "name": "HERO_TEST_01",
+    "database_path": "C:\\Users\\user\\Desktop\\PokerLabAI\\database\\experiments\\HERO_TEST_01.duckdb",
+    "hero_name": "Hero",
+    "site": "",
+    "stakes": "",
+    "start_date": "2026-07-16",
+    "block_size": 5000,
+    "created_at": "2026-07-16T22:18:40"
+  },
+  {
+    "name": "HERO_TEST_02",
+    "database_path": "C:\\Users\\user\\Desktop\\PokerLabAI\\database\\experiments\\HERO_TEST_02.duckdb",
+    "hero_name": "Hero",
+    "site": "",
+    "stakes": "",
+    "start_date": "2026-07-16",
+    "block_size": 5000,
+    "created_at": "2026-07-16T22:20:23"
+  }
+]

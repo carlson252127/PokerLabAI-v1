@@ -1,0 +1,292 @@
+from __future__ import annotations
+
+from typing import Any
+
+from PySide6.QtCore import QObject, QThread, Signal, Slot, Qt, QTimer
+from PySide6.QtWidgets import (
+    QComboBox, QFrame, QGridLayout, QHeaderView, QLabel,
+    QMessageBox, QPushButton, QSpinBox, QTableWidget,
+    QTableWidgetItem, QVBoxLayout, QWidget,
+)
+
+from services.response_comparison_service import ResponseComparisonService
+
+
+class ResponseComparisonWorker(QObject):
+    finished = Signal(dict)
+    failed = Signal(str)
+
+    def __init__(self, database_path: str, arguments: dict[str, Any]) -> None:
+        super().__init__()
+        self.service = ResponseComparisonService(database_path)
+        self.arguments = arguments
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            self.finished.emit(self.service.analyze(**self.arguments))
+        except Exception as exc:
+            self.failed.emit(f"{type(exc).__name__}: {exc}")
+
+
+class ResponseComparisonExplorer(QWidget):
+    COLUMNS = [
+        ("position", "Pozisyon"),
+        ("open_size", "Open Size"),
+        ("board", "Board"),
+        ("spot", "Street / Bet Size"),
+        ("bot_fold", "Fold vs Bot"),
+        ("pool_fold", "Fold vs Pool"),
+        ("pressure_edge", "Pressure Edge"),
+        ("bot_call", "Call vs Bot"),
+        ("pool_call", "Call vs Pool"),
+        ("call_edge", "Call Δ"),
+        ("bot_raise", "Raise vs Bot"),
+        ("pool_raise", "Raise vs Pool"),
+        ("raise_edge", "Raise Δ"),
+        ("bot_sample", "Bot Smp"),
+        ("pool_sample", "Pool Smp"),
+        ("confidence", "Güven"),
+        ("priority", "Öncelik"),
+        ("finding", "Bulgular"),
+    ]
+
+    def __init__(self, database_path: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.database_path = database_path
+        self.service = ResponseComparisonService(database_path)
+        self.worker_thread: QThread | None = None
+        self.worker: ResponseComparisonWorker | None = None
+        self._build_ui()
+        QTimer.singleShot(100, self.refresh_filters)
+
+    def _build_ui(self) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(22, 22, 22, 22)
+        root.setSpacing(12)
+
+        title = QLabel("Response Comparison Engine V3")
+        title.setObjectName("PageTitle")
+        subtitle = QLabel(
+            "Poolun bot agresyonuna verdiği Fold/Call/Raise tepkisini, "
+            "botlar hariç pool agresyonuyla aynı spot koşullarında karşılaştırır."
+        )
+        subtitle.setObjectName("PageSubtitle")
+        root.addWidget(title)
+        root.addWidget(subtitle)
+
+        filters = QFrame()
+        grid = QGridLayout(filters)
+        grid.setContentsMargins(14, 14, 14, 14)
+
+        self.group_combo = QComboBox()
+        self.site_combo = QComboBox()
+        self.stakes_combo = QComboBox()
+        self.position_combo = QComboBox()
+        self.minimum_sample = QSpinBox()
+        self.minimum_sample.setRange(10, 1_000_000)
+        self.minimum_sample.setValue(50)
+        self.minimum_sample.setSingleStep(25)
+
+        self.site_combo.addItem("Tüm Siteler", "")
+        self.stakes_combo.addItem("Tüm Limitler", "")
+
+        for label, value in [
+            ("Tüm Pozisyonlar", ""),
+            ("UTG", "UTG"), ("UTG+1", "UTG+1"), ("HJ", "HJ"),
+            ("CO", "CO"), ("BTN", "BTN"), ("SB", "SB"), ("BB", "BB"),
+        ]:
+            self.position_combo.addItem(label, value)
+
+        widgets = [
+            ("Bot Group", self.group_combo),
+            ("Site", self.site_combo),
+            ("Stakes", self.stakes_combo),
+            ("Pozisyon", self.position_combo),
+            ("Min Sample", self.minimum_sample),
+        ]
+        for column, (label, widget) in enumerate(widgets):
+            grid.addWidget(QLabel(label), 0, column)
+            grid.addWidget(widget, 1, column)
+
+        self.analyze_button = QPushButton("Bot vs Pool Karşılaştır")
+        self.analyze_button.clicked.connect(self.run_analysis)
+        grid.addWidget(self.analyze_button, 1, 5)
+        root.addWidget(filters)
+
+        self.summary_label = QLabel("Filtreleri seçip analizi başlat.")
+        self.summary_label.setWordWrap(True)
+        self.summary_label.setObjectName("ResponseSummary")
+        root.addWidget(self.summary_label)
+
+        self.status_label = QLabel("")
+        self.status_label.setObjectName("PageSubtitle")
+        root.addWidget(self.status_label)
+
+        self.table = QTableWidget(0, len(self.COLUMNS))
+        self.table.setHorizontalHeaderLabels(
+            [label for _key, label in self.COLUMNS]
+        )
+        self.table.setAlternatingRowColors(True)
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.setSelectionBehavior(
+            QTableWidget.SelectionBehavior.SelectRows
+        )
+        self.table.setSortingEnabled(True)
+        self.table.verticalHeader().setVisible(False)
+
+        header = self.table.horizontalHeader()
+        for index in range(len(self.COLUMNS) - 1):
+            header.setSectionResizeMode(
+                index, QHeaderView.ResizeMode.ResizeToContents
+            )
+        header.setSectionResizeMode(
+            len(self.COLUMNS) - 1, QHeaderView.ResizeMode.Stretch
+        )
+        root.addWidget(self.table, 1)
+
+        self.site_combo.currentIndexChanged.connect(self._reload_stakes)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        QTimer.singleShot(100, self.refresh_filters)
+
+    def refresh_filters(self) -> None:
+        try:
+            selected_group = self.group_combo.currentData()
+            self.group_combo.clear()
+            for name, hands in self.service.groups():
+                self.group_combo.addItem(f"{name} ({hands:,} hands)", name)
+
+            if selected_group:
+                index = self.group_combo.findData(selected_group)
+                if index >= 0:
+                    self.group_combo.setCurrentIndex(index)
+
+            selected_site = self.site_combo.currentData()
+            self.site_combo.blockSignals(True)
+            self.site_combo.clear()
+            self.site_combo.addItem("Tüm Siteler", "")
+            for site in self.service.sites():
+                self.site_combo.addItem(site, site)
+            if selected_site:
+                index = self.site_combo.findData(selected_site)
+                if index >= 0:
+                    self.site_combo.setCurrentIndex(index)
+            self.site_combo.blockSignals(False)
+            self._reload_stakes()
+
+            self.status_label.setText(
+                f"{self.group_combo.count()} bot grubu yüklendi."
+            )
+        except Exception as exc:
+            QMessageBox.critical(
+                self, "Response Filtre Hatası",
+                f"{type(exc).__name__}: {exc}",
+            )
+
+    def _reload_stakes(self) -> None:
+        selected = self.stakes_combo.currentData()
+        self.stakes_combo.clear()
+        self.stakes_combo.addItem("Tüm Limitler", "")
+        for stakes in self.service.stakes(
+            str(self.site_combo.currentData() or "")
+        ):
+            self.stakes_combo.addItem(stakes, stakes)
+        if selected:
+            index = self.stakes_combo.findData(selected)
+            if index >= 0:
+                self.stakes_combo.setCurrentIndex(index)
+
+    def run_analysis(self) -> None:
+        if self.worker_thread is not None:
+            return
+
+        bot_group = str(self.group_combo.currentData() or "")
+        if not bot_group:
+            QMessageBox.information(
+                self, "Response Comparison",
+                "Önce bir Bot Group seç.",
+            )
+            return
+
+        arguments = {
+            "bot_group": bot_group,
+            "site": str(self.site_combo.currentData() or ""),
+            "stakes": str(self.stakes_combo.currentData() or ""),
+            "position": str(self.position_combo.currentData() or ""),
+            "minimum_sample": int(self.minimum_sample.value()),
+        }
+
+        self.analyze_button.setEnabled(False)
+        self.status_label.setText("Response karşılaştırması hesaplanıyor…")
+
+        self.worker_thread = QThread(self)
+        self.worker = ResponseComparisonWorker(
+            self.database_path, arguments
+        )
+        self.worker.moveToThread(self.worker_thread)
+        self.worker_thread.started.connect(self.worker.run)
+        self.worker.finished.connect(self._analysis_finished)
+        self.worker.failed.connect(self._analysis_failed)
+        self.worker.finished.connect(self.worker_thread.quit)
+        self.worker.failed.connect(self.worker_thread.quit)
+        self.worker_thread.finished.connect(self._cleanup_worker)
+        self.worker_thread.start()
+
+    @Slot(dict)
+    def _analysis_finished(self, result: dict[str, Any]) -> None:
+        rows = result.get("rows", [])
+        self.table.setSortingEnabled(False)
+        self.table.setRowCount(len(rows))
+
+        percent_keys = {
+            "bot_fold", "pool_fold", "pressure_edge",
+            "bot_call", "pool_call", "call_edge",
+            "bot_raise", "pool_raise", "raise_edge",
+        }
+
+        for row_index, row in enumerate(rows):
+            for column_index, (key, _label) in enumerate(self.COLUMNS):
+                value = row.get(key, "")
+                if key in percent_keys and isinstance(value, (int, float)):
+                    prefix = "+" if key.endswith("edge") and value > 0 else ""
+                    text = f"{prefix}{value:.1f}%"
+                elif key == "priority" and isinstance(value, (int, float)):
+                    text = f"{value:.2f}"
+                elif isinstance(value, int):
+                    text = f"{value:,}"
+                else:
+                    text = str(value)
+
+                item = QTableWidgetItem(text)
+                if isinstance(value, (int, float)):
+                    item.setData(Qt.ItemDataRole.UserRole, float(value))
+                    item.setTextAlignment(
+                        Qt.AlignmentFlag.AlignCenter
+                    )
+                self.table.setItem(row_index, column_index, item)
+
+        self.table.setSortingEnabled(True)
+        self.summary_label.setText(str(result.get("summary", "")))
+        self.status_label.setText(
+            f"{len(rows)} spot • "
+            f"pozitif pressure: {result.get('positive_edges', 0)} • "
+            f"negatif pressure: {result.get('negative_edges', 0)}"
+        )
+        self.analyze_button.setEnabled(True)
+
+    @Slot(str)
+    def _analysis_failed(self, message: str) -> None:
+        self.analyze_button.setEnabled(True)
+        self.status_label.setText("Analiz başarısız.")
+        QMessageBox.critical(self, "Response Comparison Hatası", message)
+
+    @Slot()
+    def _cleanup_worker(self) -> None:
+        if self.worker is not None:
+            self.worker.deleteLater()
+        if self.worker_thread is not None:
+            self.worker_thread.deleteLater()
+        self.worker = None
+        self.worker_thread = None

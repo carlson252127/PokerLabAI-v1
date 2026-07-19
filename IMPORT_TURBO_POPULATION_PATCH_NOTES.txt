@@ -1,0 +1,15 @@
+PokerLab AI - Stabilizasyon Paketi 1
+
+1. Import Turbo CURRENT_TIMESTAMP BinderException düzeltildi.
+2. Import registry Arrow kaydı hata halinde güvenli şekilde unregister edilir.
+3. Pool artık varsayılan olarak Human Pool = bot gruplarındaki oyuncular hariç herkes.
+4. Eski tüm oyuncular sonucu All Pool olarak ayrıca korunur.
+5. PopulationService eklendi; yeni analiz modülleri aynı bot/human kuralını kullanabilir.
+
+Değişen dosyalar:
+- services/analytical_store.py
+- services/research_source_service.py
+- ui/size_board_strategy_explorer.py
+
+Yeni dosya:
+- services/population_service.py

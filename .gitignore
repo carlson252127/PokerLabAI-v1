@@ -1,0 +1,26 @@
+# Large database files
+database/*.duckdb
+database/*.db
+database/*.sqlite
+database/*.sqlite3
+database/experiments/*.duckdb
+database/position_repair_backups/
+
+# Nested local repositories
+PokerLabAI-Next/
+PokerLabAI-v1/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Logs and temporary files
+*.log
+*.tmp
+
+# Editors and Windows
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store

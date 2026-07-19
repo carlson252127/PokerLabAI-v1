@@ -1,0 +1,141 @@
+/* PokerLab AI v1.0 — Personal dark analytics theme */
+* {
+    font-family: "Segoe UI", "Inter", sans-serif;
+    font-size: 13px;
+    color: #E8EDF7;
+}
+QMainWindow, QWidget {
+    background: #0D111A;
+}
+QWidget#Sidebar {
+    background: #111722;
+    border-right: 1px solid #293244;
+}
+QLabel#SidebarBrand {
+    font-size: 24px;
+    font-weight: 800;
+    color: #F4F7FC;
+    padding: 10px 8px 14px 8px;
+}
+QLabel#SidebarBrand::after { color: #8B5CF6; }
+QTreeWidget#NavigationTree {
+    background: transparent;
+    border: none;
+    outline: none;
+    padding: 4px;
+}
+QTreeWidget#NavigationTree::item {
+    min-height: 34px;
+    border-radius: 7px;
+    padding: 3px 8px;
+    color: #AAB4C6;
+}
+QTreeWidget#NavigationTree::item:hover {
+    background: #1B2434;
+    color: #FFFFFF;
+}
+QTreeWidget#NavigationTree::item:selected {
+    background: #5B48C8;
+    color: #FFFFFF;
+    font-weight: 700;
+}
+QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QDateEdit {
+    background: #141B27;
+    border: 1px solid #303B50;
+    border-radius: 7px;
+    padding: 7px 9px;
+    min-height: 20px;
+    selection-background-color: #6D5CE7;
+}
+QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {
+    border: 1px solid #8B7CF6;
+}
+QComboBox QAbstractItemView {
+    background: #151D2A;
+    border: 1px solid #303B50;
+    selection-background-color: #5B48C8;
+}
+QPushButton {
+    background: #202A3B;
+    border: 1px solid #354159;
+    border-radius: 7px;
+    padding: 8px 14px;
+    font-weight: 600;
+}
+QPushButton:hover { background: #2A3650; border-color: #6E7C98; }
+QPushButton:pressed { background: #161E2C; }
+QPushButton:disabled { color: #667085; background: #171D28; border-color: #252D3D; }
+QPushButton#PrimaryButton, QPushButton[property="primary"] {
+    background: #7563E8;
+    border-color: #8B7CF6;
+    color: white;
+}
+QGroupBox {
+    background: #121925;
+    border: 1px solid #293449;
+    border-radius: 10px;
+    margin-top: 14px;
+    padding-top: 14px;
+    font-weight: 700;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 12px;
+    padding: 0 6px;
+    color: #B9C4D8;
+}
+QTableView, QTableWidget, QTreeView {
+    background: #101620;
+    alternate-background-color: #141C29;
+    border: 1px solid #293449;
+    border-radius: 8px;
+    gridline-color: #273044;
+    selection-background-color: #4C3EAE;
+    selection-color: #FFFFFF;
+}
+QHeaderView::section {
+    background: #182131;
+    color: #C8D1E1;
+    border: none;
+    border-right: 1px solid #2A3548;
+    border-bottom: 1px solid #2A3548;
+    padding: 8px;
+    font-weight: 700;
+}
+QTabWidget::pane {
+    border: 1px solid #293449;
+    border-radius: 8px;
+    background: #111824;
+}
+QTabBar::tab {
+    background: #151D2A;
+    color: #8994A8;
+    padding: 9px 16px;
+    border-bottom: 2px solid transparent;
+}
+QTabBar::tab:hover { color: #FFFFFF; }
+QTabBar::tab:selected {
+    color: #FFFFFF;
+    background: #1B2434;
+    border-bottom: 2px solid #8B7CF6;
+}
+QProgressBar {
+    background: #171E2B;
+    border: 1px solid #303A4F;
+    border-radius: 6px;
+    text-align: center;
+    min-height: 18px;
+}
+QProgressBar::chunk { background: #6D5CE7; border-radius: 5px; }
+QScrollBar:vertical { background: #0F151F; width: 11px; margin: 0; }
+QScrollBar::handle:vertical { background: #354158; min-height: 30px; border-radius: 5px; }
+QScrollBar::handle:vertical:hover { background: #52617D; }
+QScrollBar:horizontal { background: #0F151F; height: 11px; margin: 0; }
+QScrollBar::handle:horizontal { background: #354158; min-width: 30px; border-radius: 5px; }
+QToolTip { background: #232D40; color: white; border: 1px solid #52617D; padding: 5px; }
+QStatusBar { background: #111722; border-top: 1px solid #293244; }
+QMessageBox { background: #111824; }
+QSplitter::handle { background: #293449; }
+QCheckBox, QRadioButton { spacing: 7px; }
+QCheckBox::indicator, QRadioButton::indicator { width: 16px; height: 16px; }
+QCheckBox::indicator:checked { background: #7563E8; border: 1px solid #9A8CFF; border-radius: 3px; }
