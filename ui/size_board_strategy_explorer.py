@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QHeaderView,
+    QProgressBar,
     QVBoxLayout,
     QWidget,
 )
@@ -122,6 +123,94 @@ class MetricBox(QFrame):
             layout.addWidget(subtitle_label)
 
 
+class DistributionRow(QWidget):
+    def __init__(self, label: str, pct: float, count: int, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(7)
+
+        name = QLabel(label)
+        name.setObjectName("DistributionLabel")
+        name.setFixedWidth(58)
+
+        bar = QProgressBar()
+        bar.setObjectName("DistributionBar")
+        bar.setRange(0, 1000)
+        bar.setValue(max(0, min(1000, round(float(pct) * 10))))
+        bar.setTextVisible(False)
+        bar.setFixedHeight(9)
+
+        value = QLabel(f"{float(pct):.1f}%  ({int(count):,})")
+        value.setObjectName("DistributionValue")
+        value.setMinimumWidth(82)
+        value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+        layout.addWidget(name)
+        layout.addWidget(bar, 1)
+        layout.addWidget(value)
+
+
+class SizeDNAWidget(QFrame):
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("SizeDNAPanel")
+        root = QVBoxLayout(self)
+        root.setContentsMargins(12, 12, 12, 12)
+        root.setSpacing(8)
+
+        head = QHBoxLayout()
+        title = QLabel("SIZE DNA 2.0")
+        title.setObjectName("DNATitle")
+        self.open_label = QLabel("Open —")
+        self.open_label.setObjectName("DNAOpen")
+        head.addWidget(title)
+        head.addStretch()
+        head.addWidget(self.open_label)
+        root.addLayout(head)
+
+        self.street_labels: dict[str, QLabel] = {}
+        for street in ("Flop", "Turn", "River"):
+            label = QLabel(f"{street}: —")
+            label.setObjectName("DNAStreet")
+            self.street_labels[street.lower()] = label
+            root.addWidget(label)
+
+        self.showdown_label = QLabel("WWSF —   WTSD —   W$SD —")
+        self.showdown_label.setObjectName("DNAShowdown")
+        root.addWidget(self.showdown_label)
+
+    def set_row(self, row: dict[str, Any]) -> None:
+        dna = row.get("size_dna_data") or {}
+        avg_open = float(dna.get("open_avg_bb") or row.get("avg_size_bb") or 0.0)
+        min_open = float(dna.get("open_min_bb") or 0.0)
+        max_open = float(dna.get("open_max_bb") or 0.0)
+        open_text = f"Open {avg_open:.2f}x"
+        if min_open > 0 and max_open > 0:
+            open_text += f"  [{min_open:.2f}–{max_open:.2f}x]"
+        self.open_label.setText(open_text)
+
+        specs = (
+            ("flop", "flop_frequency", "flop_avg_bet_pct", "flop_size_sample"),
+            ("turn", "turn_frequency", "turn_avg_bet_pct", "turn_size_sample"),
+            ("river", "river_frequency", "river_avg_bet_pct", "river_size_sample"),
+        )
+        for street, freq_key, size_key, sample_key in specs:
+            freq = float(dna.get(freq_key) or row.get({"flop":"flop_cbet","turn":"turn_barrel","river":"river_barrel"}[street]) or 0.0)
+            size = float(dna.get(size_key) or row.get(f"{street}_avg_bet_pct") or 0.0)
+            sample = int(dna.get(sample_key) or row.get(f"{street}_bet_size_sample") or 0)
+            tag = "OVERBET" if size > 100 else "LARGE" if size >= 75 else "SMALL" if 0 < size <= 40 else "MID"
+            self.street_labels[street].setText(
+                f"{street.title():<5}  Freq {freq:5.1f}%   Avg {size:5.1f}% pot   n={sample:,}   {tag}"
+            )
+
+        self.showdown_label.setText(
+            f"WWSF {float(dna.get('wwsf') or row.get('wwsf') or 0):.1f}%   "
+            f"WTSD {float(dna.get('wtsd') or row.get('wtsd') or 0):.1f}%   "
+            f"W$SD {float(dna.get('wsd') or row.get('wsd') or 0):.1f}%"
+        )
+
+
 class BoardResearchCard(QFrame):
     selected = Signal(dict)
 
@@ -199,6 +288,7 @@ class BoardResearchCard(QFrame):
             )
         )
         root.addWidget(MetricBox("WWSF", f"{float(row.get('wwsf') or 0):.1f}%"))
+        root.addWidget(MetricBox("WTSD", f"{float(row.get('wtsd') or 0):.1f}%"))
         root.addWidget(MetricBox("W$SD", f"{float(row.get('wsd') or 0):.1f}%"))
 
         score = float(row.get("difference_score") or 0)
@@ -237,6 +327,7 @@ class SizeBoardStrategyExplorer(QWidget):
         self.worker_thread: QThread | None = None
         self.worker: SizeBoardWorker | None = None
         self._all_rows: list[dict[str, Any]] = []
+        self._selected_row: dict[str, Any] | None = None
         self._build_ui()
         QTimer.singleShot(100, self.refresh_filters)
 
@@ -454,8 +545,8 @@ class SizeBoardStrategyExplorer(QWidget):
 
         self.detail_panel = QFrame()
         self.detail_panel.setObjectName("DetailPanel")
-        self.detail_panel.setMinimumWidth(285)
-        self.detail_panel.setMaximumWidth(340)
+        self.detail_panel.setMinimumWidth(390)
+        self.detail_panel.setMaximumWidth(470)
         detail_layout = QVBoxLayout(self.detail_panel)
         detail_layout.setContentsMargins(15, 15, 15, 15)
         self.detail_title = QLabel("Board Detayı")
@@ -470,6 +561,26 @@ class SizeBoardStrategyExplorer(QWidget):
         self.detail_metrics = QLabel("")
         self.detail_metrics.setObjectName("DetailText")
         self.detail_metrics.setWordWrap(True)
+
+        self.size_dna_widget = SizeDNAWidget()
+
+        self.distribution_title = QLabel("BET SIZE DISTRIBUTION")
+        self.distribution_title.setObjectName("DNATitle")
+        self.distribution_street_combo = QComboBox()
+        self.distribution_street_combo.addItem("Flop", "flop")
+        self.distribution_street_combo.addItem("Turn", "turn")
+        self.distribution_street_combo.addItem("River", "river")
+        self.distribution_street_combo.currentIndexChanged.connect(self._refresh_distribution)
+        distribution_head = QHBoxLayout()
+        distribution_head.addWidget(self.distribution_title)
+        distribution_head.addStretch()
+        distribution_head.addWidget(self.distribution_street_combo)
+
+        self.distribution_container = QWidget()
+        self.distribution_layout = QVBoxLayout(self.distribution_container)
+        self.distribution_layout.setContentsMargins(0, 0, 0, 0)
+        self.distribution_layout.setSpacing(5)
+
         self.detail_representatives = QLabel("")
         self.detail_representatives.setObjectName("DetailText")
         self.detail_representatives.setWordWrap(True)
@@ -477,6 +588,9 @@ class SizeBoardStrategyExplorer(QWidget):
         detail_layout.addWidget(self.detail_board)
         detail_layout.addWidget(self.detail_family)
         detail_layout.addWidget(self.detail_metrics)
+        detail_layout.addWidget(self.size_dna_widget)
+        detail_layout.addLayout(distribution_head)
+        detail_layout.addWidget(self.distribution_container)
         detail_layout.addWidget(self.detail_representatives)
         detail_layout.addStretch()
         content.addWidget(self.detail_panel, 2)
@@ -534,6 +648,28 @@ class SizeBoardStrategyExplorer(QWidget):
             QLabel#DetailText{
                 padding:10px;background:#0f1621;border:1px solid #273247;
                 border-radius:8px;color:#cbd5e1;
+            }
+            QFrame#SizeDNAPanel{
+                background:#101827;border:1px solid #38506e;border-radius:9px;
+            }
+            QLabel#DNATitle{font-size:11px;font-weight:900;color:#dce52f;}
+            QLabel#DNAOpen{font-size:12px;font-weight:850;color:#f4f7fb;}
+            QLabel#DNAStreet{
+                padding:6px 8px;background:#0b1220;border:1px solid #26344b;
+                border-radius:6px;color:#d7e1ef;font-family:Consolas;
+            }
+            QLabel#DNAShowdown{
+                padding:7px;background:#172236;border-radius:6px;color:#7ee2a8;
+                font-weight:800;
+            }
+            QLabel#DistributionLabel,QLabel#DistributionValue{
+                color:#aebbd0;font-size:10px;
+            }
+            QProgressBar#DistributionBar{
+                background:#111925;border:1px solid #2a3950;border-radius:4px;
+            }
+            QProgressBar#DistributionBar::chunk{
+                background:#4d73e6;border-radius:3px;
             }
             """
         )
@@ -854,6 +990,7 @@ class SizeBoardStrategyExplorer(QWidget):
 
     @Slot(dict)
     def _show_detail(self, row: dict[str, Any]) -> None:
+        self._selected_row = row
         self._clear_layout(self.detail_board_layout)
         board = str(row.get("representative_board") or "")
         for card in board.split():
@@ -866,19 +1003,12 @@ class SizeBoardStrategyExplorer(QWidget):
             f"{int(row.get('hands') or 0):,} el"
         )
         self.detail_metrics.setText(
-            f"Flop: {float(row.get('flop_cbet') or 0):.1f}%  |  "
-            f"Avg {float(row.get('flop_avg_bet_pct') or 0):.1f}% pot\n"
-            f"Turn: {float(row.get('turn_barrel') or 0):.1f}%  |  "
-            f"Avg {float(row.get('turn_avg_bet_pct') or 0):.1f}% pot\n"
-            f"River: {float(row.get('river_barrel') or 0):.1f}%  |  "
-            f"Avg {float(row.get('river_avg_bet_pct') or 0):.1f}% pot\n\n"
-            f"WWSF: {float(row.get('wwsf') or 0):.1f}%\n"
-            f"W$SD: {float(row.get('wsd') or 0):.1f}%\n"
-            f"Exploit Score: {float(row.get('difference_score') or 0):.0f}\n"
-            f"Güven: {row.get('confidence', '—')}\n\n"
-            f"Size DNA: {row.get('size_dna', '—')}\n"
+            f"Exploit Score: {float(row.get('difference_score') or 0):.0f}   •   "
+            f"Güven: {row.get('confidence', '—')}\n"
             f"Öneri: {row.get('interpretation', '—')}"
         )
+        self.size_dna_widget.set_row(row)
+        self._refresh_distribution()
 
         representatives = row.get("representative_boards") or []
         lines = ["Aynı gruptaki en sık gerçek boardlar:"]
@@ -887,6 +1017,26 @@ class SizeBoardStrategyExplorer(QWidget):
                 f"• {item.get('board', '—')} — {int(item.get('hands') or 0):,} el"
             )
         self.detail_representatives.setText("\n".join(lines))
+
+    @Slot()
+    def _refresh_distribution(self) -> None:
+        self._clear_layout(self.distribution_layout)
+        row = self._selected_row or {}
+        street = str(self.distribution_street_combo.currentData() or "flop")
+        distribution = row.get(f"{street}_size_distribution") or []
+        if not distribution:
+            empty = QLabel("Bu street için sizing örneği yok.")
+            empty.setObjectName("PageSubtitle")
+            self.distribution_layout.addWidget(empty)
+            return
+        for item in distribution:
+            self.distribution_layout.addWidget(
+                DistributionRow(
+                    str(item.get("bucket") or "—"),
+                    float(item.get("pct") or 0.0),
+                    int(item.get("count") or 0),
+                )
+            )
 
     @Slot(str)
     def _analysis_failed(self, message: str) -> None:
