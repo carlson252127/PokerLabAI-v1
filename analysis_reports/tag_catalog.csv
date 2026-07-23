@@ -1,0 +1,20 @@
+tag,status,evidence_location,evidence_type,map_key_confirmed,setTagValue_confirmed,notes
+vpip,strong-old-only-candidate,"old packed raw 0x357ADA","packed ASCII cluster",no,no,"Old INI also contains hide_Vpip and hide_VpipPopup"
+pfr,strong-old-only-candidate,"old packed raw 0x357ADE","packed ASCII cluster",no,no,"Absent from new executable"
+wtsd,strong-old-only-candidate,"old packed raw 0x357AE6","packed ASCII cluster",no,no,"Absent from new executable"
+foldTo,partial-old-only-candidate,"old packed raw 0x357AFC","packed ASCII prefix",no,no,"Suffix is hidden by UPX compression/back-reference"
+wsd,not-found,,,no,no,
+steal,not-found-as-stat,,,no,no,
+checkRaise,not-found,,,no,no,
+3Bet,unconfirmed-as-stat,,,no,no,"3bet strings also belong to betting/action features"
+foldTo3Bet,not-found-complete,,,no,no,
+CBet,not-found,,,no,no,
+foldToCBet,not-found-complete,,,no,no,
+actions,confirmed-old-placeholder,"old CoinCaption.ini HUD plFormatStr0","INI placeholder",yes,no,"Removed from new INI"
+sizing,confirmed-old-placeholder,"old CoinCaption.ini HUD plFormatStr0","INI placeholder",yes,no,"Removed from new INI"
+hasNote,confirmed-old-placeholder,"old CoinCaption.ini HUD plFormatStr3","INI placeholder",yes,no,"Removed from new INI"
+isPC,confirmed-old-placeholder,"old CoinCaption.ini HUD plFormatStr4","INI placeholder",yes,no,"Removed from new INI"
+isMobile,confirmed-old-placeholder,"old CoinCaption.ini HUD plFormatStr4","INI placeholder",yes,no,"Removed from new INI"
+heroAct,confirmed-old-placeholder,"old CoinCaption.ini HUD FormatStr0..7","INI placeholder",yes,no,"Removed from new INI"
+postflop,confirmed-old-placeholder,"old CoinCaption.ini HUD FormatStr0..11","INI placeholder",yes,no,"Removed from new INI"
+preflop,confirmed-old-placeholder,"old CoinCaption.ini HUD FormatStr8..9","INI placeholder",yes,no,"Removed from new INI"

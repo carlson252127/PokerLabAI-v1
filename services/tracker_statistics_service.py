@@ -5,40 +5,29 @@ from typing import Any
 
 import duckdb
 
+from services.poker_statistics import (
+    AGGRESSIVE_ACTIONS,
+    MUCK_ACTIONS,
+    PREFLOP_CONTINUE_ACTIONS,
+    SHOW_ACTIONS,
+    SHOWDOWN_ACTIONS,
+    WIN_ACTIONS,
+    percentage,
+    sql_values,
+)
+
 
 class TrackerStatisticsService:
     """Shared tracker-style WWSF / WTSD / W$SD statistics engine."""
 
     POSITIONS = ["UTG", "HJ", "CO", "BTN", "SB", "BB", "OTHER"]
 
-    WIN_ACTIONS = {
-        "COLLECT",
-        "COLLECTED",
-        "WIN",
-        "WINS",
-        "WON",
-        "AWARD",
-        "AWARDED",
-    }
-
-    SHOW_ACTIONS = {
-        "SHOW",
-        "SHOWS",
-        "REVEAL",
-        "REVEALS",
-    }
-
-    MUCK_ACTIONS = {
-        "MUCK",
-        "MUCKS",
-        "MUCKED",
-    }
-
-    PREFLOP_CONTINUE_ACTIONS = {
-        "CALL",
-        "RAISE",
-        "CHECK",
-    }
+    WIN_ACTIONS = WIN_ACTIONS
+    SHOW_ACTIONS = SHOW_ACTIONS
+    MUCK_ACTIONS = MUCK_ACTIONS
+    SHOWDOWN_ACTIONS = SHOWDOWN_ACTIONS
+    PREFLOP_CONTINUE_ACTIONS = PREFLOP_CONTINUE_ACTIONS
+    AGGRESSIVE_ACTIONS = AGGRESSIVE_ACTIONS
 
     def __init__(
         self,
@@ -225,16 +214,16 @@ class TrackerStatisticsService:
             else ""
         )
 
-        win_values = self._sql_values(
+        win_values = sql_values(
             self.WIN_ACTIONS
         )
-        show_values = self._sql_values(
+        show_values = sql_values(
             self.SHOW_ACTIONS
         )
-        muck_values = self._sql_values(
+        muck_values = sql_values(
             self.MUCK_ACTIONS
         )
-        continue_values = self._sql_values(
+        continue_values = sql_values(
             self.PREFLOP_CONTINUE_ACTIONS
         )
 
@@ -254,30 +243,11 @@ class TrackerStatisticsService:
                 {where_sql}
             ),
 
-            hand_showdown AS (
-                SELECT
-                    hand_id,
-                    MAX(
-                        CASE
-                            WHEN UPPER(TRIM(action))
-                                 IN ({show_values}, {muck_values})
-                            THEN 1 ELSE 0
-                        END
-                    ) AS has_showdown
-                FROM actions
-                GROUP BY hand_id
-            ),
-
             flags AS (
                 SELECT
                     s.hand_id,
                     s.player_name,
                     s.position,
-                    COALESCE(
-                        hs.has_showdown,
-                        0
-                    ) AS has_showdown,
-
                     CASE
                         WHEN s.flop IS NOT NULL
                          AND TRIM(s.flop) <> ''
@@ -364,6 +334,15 @@ class TrackerStatisticsService:
 
                     MAX(
                         CASE
+                            WHEN UPPER(TRIM(a.street)) = 'RIVER'
+                             AND UPPER(TRIM(a.action))
+                                 IN ('BET', 'RAISE')
+                            THEN 1 ELSE 0
+                        END
+                    ) AS river_bet,
+
+                    MAX(
+                        CASE
                             WHEN UPPER(TRIM(a.street)) = 'FLOP'
                              AND UPPER(TRIM(a.action))
                                  IN ('BET', 'RAISE')
@@ -393,14 +372,11 @@ class TrackerStatisticsService:
                 LEFT JOIN actions a
                   ON a.hand_id = s.hand_id
                  AND a.player_name = s.player_name
-                LEFT JOIN hand_showdown hs
-                  ON hs.hand_id = s.hand_id
                 GROUP BY
                     s.hand_id,
                     s.player_name,
                     s.position,
-                    s.flop,
-                    hs.has_showdown
+                    s.flop
             ),
 
             final AS (
@@ -423,15 +399,6 @@ class TrackerStatisticsService:
                     CASE
                         WHEN showed_cards = 1
                           OR mucked_cards = 1
-                          OR (
-                              COALESCE(has_showdown, 0) = 1
-                              AND won_pot = 1
-                          )
-                          OR (
-                              COALESCE(has_showdown, 0) = 1
-                              AND has_river_action = 1
-                              AND folded_river = 0
-                          )
                         THEN 1 ELSE 0
                     END AS went_showdown
 
@@ -453,7 +420,8 @@ class TrackerStatisticsService:
                 flop_aggressive,
                 turn_aggressive,
                 river_aggressive,
-                saw_flop
+                saw_flop,
+                river_bet
             FROM final
         """
 
@@ -480,6 +448,7 @@ class TrackerStatisticsService:
                 "turn_aggressive": bool(row[12]),
                 "river_aggressive": bool(row[13]),
                 "saw_flop": bool(row[14]),
+                "river_bet": bool(row[15]),
             }
             for row in rows
         ]
@@ -597,6 +566,17 @@ class TrackerStatisticsService:
             for record in records
         )
 
+        river_bet_showdowns = sum(
+            record["river_bet"] and record["went_showdown"]
+            for record in records
+        )
+        river_bet_showdown_wins = sum(
+            record["river_bet"]
+            and record["went_showdown"]
+            and record["won_pot"]
+            for record in records
+        )
+
         flop_aggressive = sum(
             record["saw_flop"]
             and record["flop_aggressive"]
@@ -642,6 +622,8 @@ class TrackerStatisticsService:
             "showdown_wins": int(
                 showdown_wins
             ),
+            "river_bet_showdowns": int(river_bet_showdowns),
+            "river_bet_showdown_wins": int(river_bet_showdown_wins),
             "wwsf": self._pct(
                 saw_flop_and_won,
                 saw_flop,
@@ -653,6 +635,10 @@ class TrackerStatisticsService:
             "wsd": self._pct(
                 showdown_wins,
                 showdown,
+            ),
+            "river_bet_wsd": self._pct(
+                river_bet_showdown_wins,
+                river_bet_showdowns,
             ),
             "pot_won": self._pct(
                 pot_wins,
@@ -800,8 +786,4 @@ class TrackerStatisticsService:
         numerator: int,
         denominator: int,
     ) -> float:
-        return (
-            numerator / denominator * 100.0
-            if denominator
-            else 0.0
-        )
+        return percentage(numerator, denominator)

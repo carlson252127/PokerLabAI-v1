@@ -31,23 +31,15 @@ class ResponseComparisonWorker(QObject):
 
 class ResponseComparisonExplorer(QWidget):
     COLUMNS = [
-        ("position", "Pozisyon"),
-        ("open_size", "Open Size"),
-        ("board", "Board"),
-        ("spot", "Street / Bet Size"),
-        ("bot_fold", "Fold vs Bot"),
-        ("pool_fold", "Fold vs Pool"),
+        ("position", "Pozisyon"), ("open_size", "Open Size"),
+        ("board", "Board"), ("spot", "Street / Bet Size"),
+        ("bot_fold", "Fold vs Bot"), ("pool_fold", "Fold vs Pool"),
         ("pressure_edge", "Pressure Edge"),
-        ("bot_call", "Call vs Bot"),
-        ("pool_call", "Call vs Pool"),
-        ("call_edge", "Call Δ"),
-        ("bot_raise", "Raise vs Bot"),
-        ("pool_raise", "Raise vs Pool"),
-        ("raise_edge", "Raise Δ"),
-        ("bot_sample", "Bot Smp"),
-        ("pool_sample", "Pool Smp"),
-        ("confidence", "Güven"),
-        ("priority", "Öncelik"),
+        ("bot_call", "Call vs Bot"), ("pool_call", "Call vs Pool"),
+        ("call_edge", "Call Δ"), ("bot_raise", "Raise vs Bot"),
+        ("pool_raise", "Raise vs Pool"), ("raise_edge", "Raise Δ"),
+        ("bot_sample", "Bot Smp"), ("pool_sample", "Pool Smp"),
+        ("confidence", "Güven"), ("priority", "Öncelik"),
         ("finding", "Bulgular"),
     ]
 
@@ -65,11 +57,11 @@ class ResponseComparisonExplorer(QWidget):
         root.setContentsMargins(22, 22, 22, 22)
         root.setSpacing(12)
 
-        title = QLabel("Response Comparison Engine V3")
+        title = QLabel("Response Comparison Engine V4")
         title.setObjectName("PageTitle")
         subtitle = QLabel(
-            "Poolun bot agresyonuna verdiği Fold/Call/Raise tepkisini, "
-            "botlar hariç pool agresyonuyla aynı spot koşullarında karşılaştırır."
+            "İlk çalıştırmada eksik eller küçük paketlerle indekslenir. "
+            "Sonraki karşılaştırmalar response_nodes üzerinden hızlı çalışır."
         )
         subtitle.setObjectName("PageSubtitle")
         root.addWidget(title)
@@ -80,6 +72,7 @@ class ResponseComparisonExplorer(QWidget):
         grid.setContentsMargins(14, 14, 14, 14)
 
         self.group_combo = QComboBox()
+        self.node_combo = QComboBox()
         self.site_combo = QComboBox()
         self.stakes_combo = QComboBox()
         self.position_combo = QComboBox()
@@ -88,22 +81,21 @@ class ResponseComparisonExplorer(QWidget):
         self.minimum_sample.setValue(50)
         self.minimum_sample.setSingleStep(25)
 
+        for key, label in self.service.nodes():
+            self.node_combo.addItem(label, key)
         self.site_combo.addItem("Tüm Siteler", "")
         self.stakes_combo.addItem("Tüm Limitler", "")
-
         for label, value in [
-            ("Tüm Pozisyonlar", ""),
-            ("UTG", "UTG"), ("UTG+1", "UTG+1"), ("HJ", "HJ"),
-            ("CO", "CO"), ("BTN", "BTN"), ("SB", "SB"), ("BB", "BB"),
+            ("Tüm Pozisyonlar", ""), ("UTG", "UTG"), ("UTG+1", "UTG+1"),
+            ("HJ", "HJ"), ("CO", "CO"), ("BTN", "BTN"),
+            ("SB", "SB"), ("BB", "BB"),
         ]:
             self.position_combo.addItem(label, value)
 
         widgets = [
-            ("Bot Group", self.group_combo),
-            ("Site", self.site_combo),
-            ("Stakes", self.stakes_combo),
-            ("Pozisyon", self.position_combo),
-            ("Min Sample", self.minimum_sample),
+            ("Bot Group", self.group_combo), ("Node", self.node_combo),
+            ("Site", self.site_combo), ("Stakes", self.stakes_combo),
+            ("Pozisyon", self.position_combo), ("Min Sample", self.minimum_sample),
         ]
         for column, (label, widget) in enumerate(widgets):
             grid.addWidget(QLabel(label), 0, column)
@@ -111,7 +103,7 @@ class ResponseComparisonExplorer(QWidget):
 
         self.analyze_button = QPushButton("Bot vs Pool Karşılaştır")
         self.analyze_button.clicked.connect(self.run_analysis)
-        grid.addWidget(self.analyze_button, 1, 5)
+        grid.addWidget(self.analyze_button, 1, len(widgets))
         root.addWidget(filters)
 
         self.summary_label = QLabel("Filtreleri seçip analizi başlat.")
@@ -124,27 +116,17 @@ class ResponseComparisonExplorer(QWidget):
         root.addWidget(self.status_label)
 
         self.table = QTableWidget(0, len(self.COLUMNS))
-        self.table.setHorizontalHeaderLabels(
-            [label for _key, label in self.COLUMNS]
-        )
+        self.table.setHorizontalHeaderLabels([label for _key, label in self.COLUMNS])
         self.table.setAlternatingRowColors(True)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.table.setSelectionBehavior(
-            QTableWidget.SelectionBehavior.SelectRows
-        )
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setSortingEnabled(True)
         self.table.verticalHeader().setVisible(False)
-
         header = self.table.horizontalHeader()
         for index in range(len(self.COLUMNS) - 1):
-            header.setSectionResizeMode(
-                index, QHeaderView.ResizeMode.ResizeToContents
-            )
-        header.setSectionResizeMode(
-            len(self.COLUMNS) - 1, QHeaderView.ResizeMode.Stretch
-        )
+            header.setSectionResizeMode(index, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(len(self.COLUMNS) - 1, QHeaderView.ResizeMode.Stretch)
         root.addWidget(self.table, 1)
-
         self.site_combo.currentIndexChanged.connect(self._reload_stakes)
 
     def showEvent(self, event) -> None:
@@ -157,7 +139,6 @@ class ResponseComparisonExplorer(QWidget):
             self.group_combo.clear()
             for name, hands in self.service.groups():
                 self.group_combo.addItem(f"{name} ({hands:,} hands)", name)
-
             if selected_group:
                 index = self.group_combo.findData(selected_group)
                 if index >= 0:
@@ -176,22 +157,22 @@ class ResponseComparisonExplorer(QWidget):
             self.site_combo.blockSignals(False)
             self._reload_stakes()
 
+            status = self.service.index_status()
             self.status_label.setText(
-                f"{self.group_combo.count()} bot grubu yüklendi."
+                f"{self.group_combo.count()} bot grubu • "
+                f"indeks {status['indexed']:,}/{status['total']:,} el • "
+                f"{status['nodes']:,} node"
             )
         except Exception as exc:
             QMessageBox.critical(
-                self, "Response Filtre Hatası",
-                f"{type(exc).__name__}: {exc}",
+                self, "Response Filtre Hatası", f"{type(exc).__name__}: {exc}"
             )
 
     def _reload_stakes(self) -> None:
         selected = self.stakes_combo.currentData()
         self.stakes_combo.clear()
         self.stakes_combo.addItem("Tüm Limitler", "")
-        for stakes in self.service.stakes(
-            str(self.site_combo.currentData() or "")
-        ):
+        for stakes in self.service.stakes(str(self.site_combo.currentData() or "")):
             self.stakes_combo.addItem(stakes, stakes)
         if selected:
             index = self.stakes_combo.findData(selected)
@@ -201,30 +182,25 @@ class ResponseComparisonExplorer(QWidget):
     def run_analysis(self) -> None:
         if self.worker_thread is not None:
             return
-
         bot_group = str(self.group_combo.currentData() or "")
         if not bot_group:
-            QMessageBox.information(
-                self, "Response Comparison",
-                "Önce bir Bot Group seç.",
-            )
+            QMessageBox.information(self, "Response Comparison", "Önce bir Bot Group seç.")
             return
 
         arguments = {
             "bot_group": bot_group,
+            "node": str(self.node_combo.currentData() or "ALL_RESPONSES"),
             "site": str(self.site_combo.currentData() or ""),
             "stakes": str(self.stakes_combo.currentData() or ""),
             "position": str(self.position_combo.currentData() or ""),
             "minimum_sample": int(self.minimum_sample.value()),
         }
-
         self.analyze_button.setEnabled(False)
-        self.status_label.setText("Response karşılaştırması hesaplanıyor…")
-
-        self.worker_thread = QThread(self)
-        self.worker = ResponseComparisonWorker(
-            self.database_path, arguments
+        self.status_label.setText(
+            "Eksik eller küçük paketlerle indeksleniyor; ardından karşılaştırma yapılacak…"
         )
+        self.worker_thread = QThread(self)
+        self.worker = ResponseComparisonWorker(self.database_path, arguments)
         self.worker.moveToThread(self.worker_thread)
         self.worker_thread.started.connect(self.worker.run)
         self.worker.finished.connect(self._analysis_finished)
@@ -239,13 +215,11 @@ class ResponseComparisonExplorer(QWidget):
         rows = result.get("rows", [])
         self.table.setSortingEnabled(False)
         self.table.setRowCount(len(rows))
-
         percent_keys = {
             "bot_fold", "pool_fold", "pressure_edge",
             "bot_call", "pool_call", "call_edge",
             "bot_raise", "pool_raise", "raise_edge",
         }
-
         for row_index, row in enumerate(rows):
             for column_index, (key, _label) in enumerate(self.COLUMNS):
                 value = row.get(key, "")
@@ -258,21 +232,20 @@ class ResponseComparisonExplorer(QWidget):
                     text = f"{value:,}"
                 else:
                     text = str(value)
-
                 item = QTableWidgetItem(text)
                 if isinstance(value, (int, float)):
                     item.setData(Qt.ItemDataRole.UserRole, float(value))
-                    item.setTextAlignment(
-                        Qt.AlignmentFlag.AlignCenter
-                    )
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.table.setItem(row_index, column_index, item)
 
         self.table.setSortingEnabled(True)
         self.summary_label.setText(str(result.get("summary", "")))
+        index = result.get("index", {})
         self.status_label.setText(
-            f"{len(rows)} spot • "
-            f"pozitif pressure: {result.get('positive_edges', 0)} • "
-            f"negatif pressure: {result.get('negative_edges', 0)}"
+            f"{len(rows)} spot • indeks {index.get('indexed', 0):,}/"
+            f"{index.get('total', 0):,} el • "
+            f"bu çalışmada +{index.get('added_hands', 0):,} el, "
+            f"+{index.get('added_nodes', 0):,} node"
         )
         self.analyze_button.setEnabled(True)
 

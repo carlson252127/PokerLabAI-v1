@@ -24,3 +24,7 @@ __pycache__/
 .idea/
 Thumbs.db
 .DS_Store
+
+database/*.zip
+database/*.duckdb
+database/*.duckdb.wal

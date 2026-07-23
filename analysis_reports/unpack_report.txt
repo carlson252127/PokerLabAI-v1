@@ -1,0 +1,127 @@
+CoinCaption static unpack and removed player-stat analysis report
+================================================================
+
+Scope
+-----
+Old source:
+C:\Users\user\Desktop\coincaption old\CoinCaption\CoinCaption.exe
+
+New source:
+C:\Program Files\CoinCaption\CoinCaption.exe
+
+No source file was modified or executed. No DLL was loaded. No network
+connection was made.
+
+Source hashes
+-------------
+Old SHA-256:
+47FE9BD5AFE2F61C7687E7A040052F80BF998696DA737A8B4DC0C6CD9ECA2D70
+
+New SHA-256:
+D639DA97708FD3B5F49A904CBCB5304482D937BEB0AD327E75702870743520C4
+
+UPX result
+----------
+where.exe upx: not found
+
+Both files contain UPX0 and UPX1 PE sections and the UPX! signature at
+file offset 0x3E0. UPX was not available, so no unpack operation was
+attempted and no unpacked hash exists.
+
+Packed PE comparison
+--------------------
+Both files:
+- PE32+ / AMD64 (0x8664)
+- Image base 0x400000
+- Sections: UPX0, UPX1, .rsrc
+- UPX0 RawSize = 0
+- No exports
+- Same high-level DLL import set
+
+Old:
+- Size: 10031512 bytes
+- PE timestamp: 2026-06-12 12:04:07 UTC
+- COFF symbols: 46315
+- Packed entry RVA: 0xEFDDC0
+
+New:
+- Size: 9992735 bytes
+- PE timestamp: 2025-11-12 13:50:19 UTC
+- COFF symbols: 46203
+- Packed entry RVA: 0xE7CC00
+
+Removed player-stat code
+------------------------
+The following symbols exist in the old executable and are absent from
+the new executable:
+
+- GameTable::update_stats(int, Stats&)                 0x6DC30, size 0x600
+- update_stats(int, Stats&, int)                       0xB1980, size 0x25D0
+- parse_user_stats(UnicodeString,UnicodeString,
+  UnicodeString,int)                                   0xD1890, size 0x810
+- process_stats(UnicodeString,UnicodeString)            0xD20A0, size 0x3A0
+- user_stats global                                    section 3 +0xC88
+- std::map<int, Stats> helpers                         old only
+
+The generic HUD engine remains in both builds:
+
+- ThudForm::setTagValue
+- ThudForm::plSetTagValue
+- ThudForm::replaceTagsInFormula
+- ThudForm::processFormulas
+- ThudForm::updateTags
+- getStColorForTag
+- map<UnicodeString, PlTags>
+- map<UnicodeString, ColorRange>
+- vector<ColorPos>
+- tagColorRange
+
+ThudForm::initTags comparison
+-----------------------------
+Old: 0xE1220, size 0x4FF0
+New: 0xD7530, size 0x4D70
+Difference: old is 0x280 (640) bytes larger.
+
+The exact removed instructions cannot be identified while the original
+.text section remains UPX-compressed.
+
+Packed string evidence
+----------------------
+Old UPX1 packed stream:
+- 0x357ADA: vpip
+- 0x357ADE: pfr
+- 0x357AE6: wtsd
+- 0x357AFC: foldTo
+
+These occur in one close packed-data cluster. pfr, wtsd, and foldTo do
+not occur in the new executable. The new file has a "vpiped" fragment,
+which is not evidence of a standalone vpip tag.
+
+INI evidence
+------------
+Old INI contains:
+- hide_Vpip
+- hide_VpipPopup
+- hide_player_profile
+- custom_color_notes
+- plFormatStr0..4
+- player font, frame, and per-seat coordinate settings
+
+Removed player placeholders include:
+[actions], [sizing], [!f], [h], [hasNote], [isPC], [isMobile],
+[heroAct], [postflop], [preflop], [sitOutNextBB], [RNG2]
+
+Conclusion
+----------
+The removed feature was not only hidden in the UI. The old player-stat
+ingestion and processing pipeline was removed from the new binary.
+The reusable tag/parser/color engine remains.
+
+Not verifiable without a trusted static UPX unpack
+--------------------------------------------------
+- Real function bytes and instruction-level XREFs
+- parse_user_stats input format and accepted-key comparisons
+- Stats field offsets and types
+- The exact old-only 0x280 initTags block
+- Per-stat ColorRange/ColorPos thresholds
+- Exact getStColorForTag comparison/jump behavior

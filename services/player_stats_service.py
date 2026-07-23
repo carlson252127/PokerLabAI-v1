@@ -25,7 +25,35 @@ class PlayerStatsService:
         name_query: str = "",
         minimum_hands: int = 1,
         limit: int = 500,
+        use_aliases: bool = False,
     ) -> list[dict]:
+        alias_enabled = bool(
+            use_aliases
+            and self._table_exists("player_aliases")
+        )
+        alias_join = ""
+        profile_expression = "hp.player_name"
+
+        if alias_enabled:
+            alias_join = """
+                LEFT JOIN (
+                    SELECT
+                        LOWER(TRIM(player_name)) AS player_key,
+                        MIN(alias_name) AS alias_name
+                    FROM player_aliases
+                    WHERE player_name IS NOT NULL
+                      AND TRIM(player_name) <> ''
+                      AND alias_name IS NOT NULL
+                      AND TRIM(alias_name) <> ''
+                    GROUP BY LOWER(TRIM(player_name))
+                ) pa
+                  ON pa.player_key = LOWER(TRIM(hp.player_name))
+            """
+            profile_expression = (
+                "COALESCE(NULLIF(TRIM(pa.alias_name), ''), "
+                "hp.player_name)"
+            )
+
         clauses: list[str] = []
         params: list[object] = []
 
@@ -39,7 +67,7 @@ class PlayerStatsService:
 
         if name_query:
             clauses.append(
-                "LOWER(hp.player_name) LIKE ?"
+                f"LOWER({profile_expression}) LIKE ?"
             )
             params.append(f"%{name_query.lower()}%")
 
@@ -51,18 +79,21 @@ class PlayerStatsService:
             WITH filtered_players AS (
                 SELECT
                     hp.hand_id,
-                    hp.player_name,
+                    hp.player_name AS source_player_name,
+                    {profile_expression} AS player_name,
                     hp.position
                 FROM hand_players hp
                 JOIN hands h
                   ON h.hand_id = hp.hand_id
+                {alias_join}
                 {where_sql}
             ),
 
             player_hands AS (
                 SELECT
                     player_name,
-                    COUNT(*) AS hands
+                    COUNT(DISTINCT hand_id) AS hands,
+                    COUNT(DISTINCT source_player_name) AS merged_nicks
                 FROM filtered_players
                 GROUP BY player_name
             ),
@@ -88,7 +119,7 @@ class PlayerStatsService:
                 FROM filtered_players fp
                 LEFT JOIN actions a
                   ON a.hand_id = fp.hand_id
-                 AND a.player_name = fp.player_name
+                 AND a.player_name = fp.source_player_name
                 GROUP BY
                     fp.player_name,
                     fp.hand_id
@@ -124,7 +155,7 @@ class PlayerStatsService:
                 FROM filtered_players fp
                 LEFT JOIN raise_order ro
                   ON ro.hand_id = fp.hand_id
-                 AND ro.player_name = fp.player_name
+                 AND ro.player_name = fp.source_player_name
                 GROUP BY
                     fp.player_name,
                     fp.hand_id
@@ -160,7 +191,7 @@ class PlayerStatsService:
 
                     MAX(
                         CASE
-                            WHEN pfr.player_name = fp.player_name
+                            WHEN pfr.player_name = fp.source_player_name
                              AND h.flop IS NOT NULL
                              AND h.flop <> ''
                             THEN 1 ELSE 0
@@ -169,7 +200,7 @@ class PlayerStatsService:
 
                     MAX(
                         CASE
-                            WHEN pfr.player_name = fp.player_name
+                            WHEN pfr.player_name = fp.source_player_name
                              AND a.street = 'FLOP'
                              AND a.action = 'BET'
                             THEN 1 ELSE 0
@@ -178,14 +209,14 @@ class PlayerStatsService:
 
                     MAX(
                         CASE
-                            WHEN pfr.player_name = fp.player_name
+                            WHEN pfr.player_name = fp.source_player_name
                              AND h.turn IS NOT NULL
                              AND h.turn <> ''
                              AND EXISTS (
                                 SELECT 1
                                 FROM actions fa
                                 WHERE fa.hand_id = fp.hand_id
-                                  AND fa.player_name = fp.player_name
+                                  AND fa.player_name = fp.source_player_name
                                   AND fa.street = 'FLOP'
                                   AND fa.action = 'BET'
                              )
@@ -195,7 +226,7 @@ class PlayerStatsService:
 
                     MAX(
                         CASE
-                            WHEN pfr.player_name = fp.player_name
+                            WHEN pfr.player_name = fp.source_player_name
                              AND a.street = 'TURN'
                              AND a.action = 'BET'
                             THEN 1 ELSE 0
@@ -204,14 +235,14 @@ class PlayerStatsService:
 
                     MAX(
                         CASE
-                            WHEN pfr.player_name = fp.player_name
+                            WHEN pfr.player_name = fp.source_player_name
                              AND h.river IS NOT NULL
                              AND h.river <> ''
                              AND EXISTS (
                                 SELECT 1
                                 FROM actions ta
                                 WHERE ta.hand_id = fp.hand_id
-                                  AND ta.player_name = fp.player_name
+                                  AND ta.player_name = fp.source_player_name
                                   AND ta.street = 'TURN'
                                   AND ta.action = 'BET'
                              )
@@ -221,7 +252,7 @@ class PlayerStatsService:
 
                     MAX(
                         CASE
-                            WHEN pfr.player_name = fp.player_name
+                            WHEN pfr.player_name = fp.source_player_name
                              AND a.street = 'RIVER'
                              AND a.action = 'BET'
                             THEN 1 ELSE 0
@@ -235,7 +266,7 @@ class PlayerStatsService:
                   ON pfr.hand_id = fp.hand_id
                 LEFT JOIN actions a
                   ON a.hand_id = fp.hand_id
-                 AND a.player_name = fp.player_name
+                 AND a.player_name = fp.source_player_name
                 GROUP BY
                     fp.player_name,
                     fp.hand_id
@@ -245,6 +276,7 @@ class PlayerStatsService:
                 SELECT
                     ph.player_name,
                     ph.hands,
+                    ph.merged_nicks,
 
                     SUM(COALESCE(pf.vpip, 0)) AS vpip_made,
                     SUM(COALESCE(pf.pfr, 0)) AS pfr_made,
@@ -270,7 +302,8 @@ class PlayerStatsService:
                  AND ps.hand_id = pf.hand_id
                 GROUP BY
                     ph.player_name,
-                    ph.hands
+                    ph.hands,
+                    ph.merged_nicks
             )
 
             SELECT
@@ -302,7 +335,8 @@ class PlayerStatsService:
                     / NULLIF(river_barrel_opp, 0) AS river_barrel,
 
                 river_barrel_made,
-                river_barrel_opp
+                river_barrel_opp,
+                merged_nicks
 
             FROM combined
             WHERE hands >= ?
@@ -339,10 +373,25 @@ class PlayerStatsService:
                     "river_barrel": self._nullable_float(row[11]),
                     "river_barrel_made": int(row[12] or 0),
                     "river_barrel_opp": int(row[13] or 0),
+                    "merged_nicks": int(row[14] or 1),
                 }
             )
 
         return result
+
+    def _table_exists(self, table_name: str) -> bool:
+        with self.connect() as con:
+            row = con.execute(
+                """
+                SELECT COUNT(*)
+                FROM information_schema.tables
+                WHERE table_schema = 'main'
+                  AND LOWER(table_name) = LOWER(?)
+                """,
+                [table_name],
+            ).fetchone()
+
+        return bool(row and int(row[0] or 0) > 0)
 
     def _extra_hand_filter(
         self,

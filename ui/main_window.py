@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from importlib import import_module
 from pathlib import Path
 
 from PySide6.QtCore import QThread, Qt
 from PySide6.QtWidgets import (
-    
     QFileDialog,
+    QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -23,34 +25,6 @@ from PySide6.QtWidgets import (
 from services.analytical_store import AnalyticalStore
 from services.import_service import ImportService
 from services.import_worker import ImportWorker
-from ui.board_explorer import BoardExplorer
-from ui.population_explorer import PopulationExplorer
-from ui.gto_comparison_explorer import GTOComparisonExplorer
-from ui.mda_matrix_explorer import MDAMatrixExplorer
-from ui.gto_import_explorer import GTOImportExplorer
-from ui.exploit_report_explorer import ExploitReportExplorer
-from ui.player_explorer import PlayerExplorer
-from ui.settings_page import SettingsPage
-from ui.alias_manager_page import AliasManagerPage
-from ui.bot_similarity_explorer import BotSimilarityExplorer
-from ui.bot_group_manager import BotGroupManager
-from ui.bot_profile_explorer import BotProfileExplorer
-from ui.showdown_explorer import ShowdownExplorer
-from ui.metric_validator_explorer import MetricValidatorExplorer
-from ui.parser_debugger_explorer import ParserDebuggerExplorer
-from ui.bot_dna_explorer import BotDNAExplorer
-from ui.wwsf_analyzer_explorer import WWSFAnalyzerExplorer
-from ui.wsd_analyzer_explorer import WSDAnalyzerExplorer
-from ui.tracker_hh_export_explorer import TrackerHHExportExplorer
-from ui.open_size_explorer import OpenSizeExplorer
-from ui.response_explorer import ResponseExplorer
-from ui.response_comparison_explorer import ResponseComparisonExplorer
-from ui.board_matchup_explorer import BoardMatchupExplorer
-from ui.size_board_strategy_explorer import SizeBoardStrategyExplorer
-from ui.experiment_database_manager import ExperimentDatabaseManager
-from ui.hero_adaptation_explorer import HeroAdaptationExplorer
-
-
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -101,125 +75,41 @@ class MainWindow(QMainWindow):
 
         self.pages = QStackedWidget()
 
-        self.dashboard_page = self._dashboard_page()
-        self.import_page = self._import_page()
-        self.population_page = PopulationExplorer(
-            self.store.database_path
-        )
-        self.player_explorer_page = PlayerExplorer(
-            self.store.database_path
-        )
-        self.alias_manager_page = AliasManagerPage(
-            self.store.database_path
-        )
-        self.bot_similarity_page = BotSimilarityExplorer(
-            self.store.database_path
-        )
-        self.bot_group_page = BotGroupManager(
-            self.store.database_path
-        )
-        self.bot_profile_page = BotProfileExplorer(
-            self.store.database_path
-        )
-        self.bot_dna_page = BotDNAExplorer(
-            self.store.database_path
-        )
-        self.open_size_page = OpenSizeExplorer(
-            self.store.database_path
-        )
-        self.response_explorer_page = ResponseExplorer(
-            self.store.database_path
-        )
-        self.response_comparison_page = ResponseComparisonExplorer(
-            self.store.database_path
-        )
-        self.board_matchup_page = BoardMatchupExplorer(
-            self.store.database_path
-        )
-        self.size_board_strategy_page = SizeBoardStrategyExplorer(
-            self.store.database_path
-        )
-        self.wwsf_analyzer_page = WWSFAnalyzerExplorer(
-            self.store.database_path
-        )
-        self.wsd_analyzer_page = WSDAnalyzerExplorer(
-            self.store.database_path
-        )
-        self.showdown_page = ShowdownExplorer(
-            self.store.database_path
-        )
-        self.metric_validator_page = MetricValidatorExplorer(
-            self.store.database_path
-        )
-        self.parser_debugger_page = ParserDebuggerExplorer(
-            self.store.database_path
-        )
-        self.tracker_hh_export_page = TrackerHHExportExplorer(
-            self.store.database_path
-        )
-        self.board_explorer_page = BoardExplorer(
-            self.store.database_path
-        )
-        self.mda_matrix_page = MDAMatrixExplorer(
-            self.store.database_path
-        )
-        self.gto_import_page = GTOImportExplorer(
-            self.store.database_path
-        )
-        self.exploit_report_page = ExploitReportExplorer(
-            self.store.database_path
-        )
-        self.ai_coach_page = GTOComparisonExplorer(
-            self.store.database_path
-        )
-        self.settings_page = SettingsPage(
-            self.store.database_path
-        )
-        self.settings_page.database_cleared.connect(
-            self._on_database_cleared
-        )
-
-        self.experiment_database_page = ExperimentDatabaseManager(
-            self.store.database_path
-        )
-        self.hero_adaptation_page = HeroAdaptationExplorer(
-            self.store.database_path
-        )
         self.module_registry = [
-            ("Core", "dashboard", "Dashboard", self.dashboard_page, self._refresh_dashboard, ("home", "özet")),
-            ("Core", "import", "Import", self.import_page, None, ("hand history", "yükle")),
-            ("Core", "population", "Population", self.population_page, self._refresh_callback(self.population_page, "refresh_filters"), ("pool", "havuz")),
+            ("Core", "dashboard", "Dashboard", self._local_page_factory("dashboard_page", self._dashboard_page), None, ("home", "özet")),
+            ("Core", "import", "Import", self._local_page_factory("import_page", self._import_page), None, ("hand history", "yükle")),
+            ("Core", "population", "Population", self._database_page_factory("population_page", "ui.population_explorer", "PopulationExplorer"), "refresh_filters", ("pool", "havuz")),
 
-            ("Bot Lab", "player_explorer", "Player Explorer", self.player_explorer_page, self._refresh_callback(self.player_explorer_page, "refresh_filters"), ("player", "oyuncu")),
-            ("Bot Lab", "alias_manager", "Alias Manager", self.alias_manager_page, self._refresh_callback(self.alias_manager_page, "refresh_aliases"), ("alias", "grup")),
-            ("Bot Lab", "bot_groups", "Bot Group Manager", self.bot_group_page, self._refresh_callback(self.bot_group_page, "refresh_filters"), ("bot", "group", "cluster", "grup")),
-            ("Bot Lab", "bot_similarity", "Bot Similarity", self.bot_similarity_page, self._refresh_callback(self.bot_similarity_page, "refresh_filters"), ("bot", "benzerlik")),
-            ("Bot Lab", "bot_profile", "Bot Profile Report", self.bot_profile_page, self._refresh_callback(self.bot_profile_page, "refresh_filters"), ("bot", "profil")),
-            ("Bot Lab", "bot_dna", "Bot DNA Engine", self.bot_dna_page, self._refresh_callback(self.bot_dna_page, "refresh_filters"), ("dna", "fingerprint")),
+            ("Bot Lab", "player_explorer", "Player Explorer", self._database_page_factory("player_explorer_page", "ui.player_explorer", "PlayerExplorer"), "refresh_filters", ("player", "oyuncu")),
+            ("Bot Lab", "alias_manager", "Alias Manager", self._database_page_factory("alias_manager_page", "ui.alias_manager_page", "AliasManagerPage"), "refresh_aliases", ("alias", "grup")),
+            ("Bot Lab", "bot_groups", "Bot Group Manager", self._database_page_factory("bot_group_page", "ui.bot_group_manager", "BotGroupManager"), "refresh_filters", ("bot", "group", "cluster", "grup")),
+            ("Bot Lab", "bot_similarity", "Bot Similarity", self._database_page_factory("bot_similarity_page", "ui.bot_similarity_explorer", "BotSimilarityExplorer"), "refresh_filters", ("bot", "benzerlik")),
+            ("Bot Lab", "bot_profile", "Bot Profile Report", self._database_page_factory("bot_profile_page", "ui.bot_profile_explorer", "BotProfileExplorer"), "refresh_filters", ("bot", "profil")),
+            ("Bot Lab", "bot_dna", "Bot DNA Engine", self._database_page_factory("bot_dna_page", "ui.bot_dna_explorer", "BotDNAExplorer"), "refresh_filters", ("dna", "fingerprint")),
 
-            ("Open Size Lab", "open_size", "Open Size Explorer", self.open_size_page, self._refresh_callback(self.open_size_page, "refresh_filters"), ("open", "size")),
-            ("Open Size Lab", "pool_response", "Pool Response Explorer", self.response_explorer_page, self._refresh_callback(self.response_explorer_page, "refresh_filters"), ("response", "fold", "3bet")),
-            ("Open Size Lab", "response_compare", "Bot vs Pool Response", self.response_comparison_page, self._refresh_callback(self.response_comparison_page, "refresh_filters"), ("bot", "pool", "pressure", "comparison")),
-            ("Open Size Lab", "board_matchup", "Board Matchup & Pool Response", self.board_matchup_page, self._refresh_callback(self.board_matchup_page, "refresh_filters"), ("board", "matchup", "human", "pool", "cbet", "fold", "overbet")),
-            ("Open Size Lab", "size_board", "Size × Board Strategy", self.size_board_strategy_page, self._refresh_callback(self.size_board_strategy_page, "refresh_filters"), ("board", "texture")),
+            ("Open Size Lab", "open_size", "Open Size Explorer", self._database_page_factory("open_size_page", "ui.open_size_explorer", "OpenSizeExplorer"), "refresh_filters", ("open", "size")),
+            ("Open Size Lab", "pool_response", "Pool Response Explorer", self._database_page_factory("response_explorer_page", "ui.response_explorer", "ResponseExplorer"), "refresh_filters", ("response", "fold", "3bet")),
+            ("Open Size Lab", "response_compare", "Bot vs Pool Response", self._database_page_factory("response_comparison_page", "ui.response_comparison_explorer", "ResponseComparisonExplorer"), "refresh_filters", ("bot", "pool", "pressure", "comparison")),
+            ("Open Size Lab", "board_matchup", "Board Matchup & Pool Response", self._database_page_factory("board_matchup_page", "ui.board_matchup_explorer", "BoardMatchupExplorer"), "refresh_filters", ("board", "matchup", "human", "pool", "cbet", "fold", "overbet")),
+            ("Open Size Lab", "size_board", "Size × Board Strategy", self._database_page_factory("size_board_strategy_page", "ui.size_board_strategy_explorer", "SizeBoardStrategyExplorer"), "refresh_filters", ("board", "texture")),
 
-            ("Hero Lab", "experiment_database", "Experiment Database Manager", self.experiment_database_page, self._refresh_callback(self.experiment_database_page, "refresh_all"), ("experiment", "database", "5k")),
-            ("Hero Lab", "hero_adaptation", "Hero Adaptation Analyzer", self.hero_adaptation_page, self._refresh_callback(self.hero_adaptation_page, "refresh_experiments"), ("hero", "adaptation", "drift")),
+            ("Hero Lab", "experiment_database", "Experiment Database Manager", self._database_page_factory("experiment_database_page", "ui.experiment_database_manager", "ExperimentDatabaseManager"), "refresh_all", ("experiment", "database", "5k")),
+            ("Hero Lab", "hero_adaptation", "Hero Adaptation Analyzer", self._database_page_factory("hero_adaptation_page", "ui.hero_adaptation_explorer", "HeroAdaptationExplorer"), "refresh_experiments", ("hero", "adaptation", "drift")),
 
-            ("Showdown & MDA", "wwsf_analyzer", "WWSF Analyzer", self.wwsf_analyzer_page, self._refresh_callback(self.wwsf_analyzer_page, "refresh_filters"), ("wwsf",)),
-            ("Showdown & MDA", "wsd_analyzer", "W$SD Analyzer", self.wsd_analyzer_page, self._refresh_callback(self.wsd_analyzer_page, "refresh_filters"), ("wsd", "showdown")),
-            ("Showdown & MDA", "showdown_report", "WWSF / W$SD Report", self.showdown_page, self._refresh_callback(self.showdown_page, "refresh_filters"), ("report", "breakdown")),
-            ("Showdown & MDA", "metric_validator", "Metric Validator", self.metric_validator_page, self._refresh_callback(self.metric_validator_page, "refresh_filters"), ("validator", "doğrula")),
+            ("Showdown & MDA", "wwsf_analyzer", "WWSF Analyzer", self._database_page_factory("wwsf_analyzer_page", "ui.wwsf_analyzer_explorer", "WWSFAnalyzerExplorer"), "refresh_filters", ("wwsf",)),
+            ("Showdown & MDA", "wsd_analyzer", "W$SD Analyzer", self._database_page_factory("wsd_analyzer_page", "ui.wsd_analyzer_explorer", "WSDAnalyzerExplorer"), "refresh_filters", ("wsd", "showdown")),
+            ("Showdown & MDA", "showdown_report", "WWSF / W$SD Report", self._database_page_factory("showdown_page", "ui.showdown_explorer", "ShowdownExplorer"), "refresh_filters", ("report", "breakdown")),
+            ("Showdown & MDA", "metric_validator", "Metric Validator", self._database_page_factory("metric_validator_page", "ui.metric_validator_explorer", "MetricValidatorExplorer"), "refresh_filters", ("validator", "doğrula")),
 
-            ("Solver & Reports", "board_explorer", "Board Explorer", self.board_explorer_page, self._refresh_callback(self.board_explorer_page, "refresh_filters"), ("board", "flop")),
-            ("Solver & Reports", "mda_matrix", "MDA Matrix", self.mda_matrix_page, self._refresh_callback(self.mda_matrix_page, "refresh_filters"), ("mda", "matrix")),
-            ("Solver & Reports", "gto_import", "GTO Import", self.gto_import_page, self._refresh_callback(self.gto_import_page, "refresh_filters"), ("gto", "solver")),
-            ("Solver & Reports", "exploit_report", "Exploit Report", self.exploit_report_page, self._refresh_callback(self.exploit_report_page, "refresh_filters"), ("exploit", "report")),
-            ("Solver & Reports", "ai_coach", "AI Coach", self.ai_coach_page, self._refresh_callback(self.ai_coach_page, "refresh_filters"), ("coach", "öneri")),
+            ("Solver & Reports", "board_explorer", "Board Explorer", self._database_page_factory("board_explorer_page", "ui.board_explorer", "BoardExplorer"), "refresh_filters", ("board", "flop")),
+            ("Solver & Reports", "mda_matrix", "MDA Matrix", self._database_page_factory("mda_matrix_page", "ui.mda_matrix_explorer", "MDAMatrixExplorer"), "refresh_filters", ("mda", "matrix")),
+            ("Solver & Reports", "gto_import", "GTO Import", self._database_page_factory("gto_import_page", "ui.gto_import_explorer", "GTOImportExplorer"), "refresh_filters", ("gto", "solver")),
+            ("Solver & Reports", "exploit_report", "Exploit Report", self._database_page_factory("exploit_report_page", "ui.exploit_report_explorer", "ExploitReportExplorer"), "refresh_filters", ("exploit", "report")),
+            ("Solver & Reports", "ai_coach", "AI Coach", self._database_page_factory("ai_coach_page", "ui.gto_comparison_explorer", "GTOComparisonExplorer"), "refresh_filters", ("coach", "öneri")),
 
-            ("System", "parser_debugger", "Parser Debugger", self.parser_debugger_page, self._refresh_callback(self.parser_debugger_page, "refresh_filters"), ("parser", "debug")),
-            ("System", "tracker_export", "Tracker HH Export", self.tracker_hh_export_page, self._refresh_callback(self.tracker_hh_export_page, "refresh_filters"), ("export", "h2n")),
-            ("System", "settings", "Settings", self.settings_page, None, ("ayar", "database")),
+            ("System", "parser_debugger", "Parser Debugger", self._database_page_factory("parser_debugger_page", "ui.parser_debugger_explorer", "ParserDebuggerExplorer"), "refresh_filters", ("parser", "debug")),
+            ("System", "tracker_export", "Tracker HH Export", self._database_page_factory("tracker_hh_export_page", "ui.tracker_hh_export_explorer", "TrackerHHExportExplorer"), "refresh_filters", ("export", "h2n")),
+            ("System", "settings", "Settings", self._database_page_factory("settings_page", "ui.settings_page", "SettingsPage"), None, ("ayar", "database")),
         ]
 
         self.modules_by_key = {}
@@ -250,18 +140,18 @@ class MainWindow(QMainWindow):
                 module_category,
                 key,
                 title,
-                page,
-                refresh,
+                factory,
+                refresh_method,
                 keywords,
             ) in self.module_registry:
                 if module_category != category:
                     continue
 
-                self.pages.addWidget(page)
                 self.modules_by_key[key] = {
                     "title": title,
-                    "page": page,
-                    "refresh": refresh,
+                    "page": None,
+                    "factory": factory,
+                    "refresh_method": refresh_method,
                     "category": category,
                     "keywords": keywords,
                 }
@@ -290,20 +180,38 @@ class MainWindow(QMainWindow):
         self._apply_style()
         self.navigate_to("dashboard")
 
-    def _refresh_callback(
+    def _local_page_factory(
         self,
-        page: QWidget,
-        method_name: str,
+        attribute_name: str,
+        builder,
     ):
-        method = getattr(page, method_name, None)
+        def factory() -> QWidget:
+            page = builder()
+            setattr(self, attribute_name, page)
+            return page
 
-        if not callable(method):
-            return None
+        return factory
 
-        def callback() -> None:
-            method()
+    def _database_page_factory(
+        self,
+        attribute_name: str,
+        module_name: str,
+        class_name: str,
+    ):
+        def factory() -> QWidget:
+            page_module = import_module(module_name)
+            page_class = getattr(page_module, class_name)
+            page = page_class(self.store.database_path)
+            setattr(self, attribute_name, page)
 
-        return callback
+            if attribute_name == "settings_page":
+                page.database_cleared.connect(
+                    self._on_database_cleared
+                )
+
+            return page
+
+        return factory
 
     def _on_navigation_clicked(
         self,
@@ -336,26 +244,63 @@ class MainWindow(QMainWindow):
             )
             return
 
-        self.pages.setCurrentWidget(
-            module["page"]
-        )
+        page = module["page"]
+
+        if page is None:
+            try:
+                page = module["factory"]()
+                self.pages.addWidget(page)
+                module["page"] = page
+            except Exception as exc:
+                QMessageBox.critical(
+                    self,
+                    f"{module['title']} Açılış Hatası",
+                    f"{type(exc).__name__}: {exc}",
+                )
+                return
+
+        self.pages.setCurrentWidget(page)
 
         item = self.menu_items_by_key.get(key)
 
         if item is not None:
             self.menu.setCurrentItem(item)
 
-        refresh = module["refresh"]
+        refresh_method = module["refresh_method"]
 
-        if refresh is not None:
+        if key == "dashboard":
             try:
-                refresh()
+                self._refresh_dashboard()
             except Exception as exc:
                 QMessageBox.warning(
                     self,
                     f"{module['title']} Yenileme Hatası",
                     f"{type(exc).__name__}: {exc}",
                 )
+        elif refresh_method:
+            refresh = getattr(page, refresh_method, None)
+            if callable(refresh):
+                try:
+                    refresh()
+                except Exception as exc:
+                    QMessageBox.warning(
+                        self,
+                        f"{module['title']} Yenileme Hatası",
+                        f"{type(exc).__name__}: {exc}",
+                    )
+
+    def _refresh_loaded_module(self, key: str) -> None:
+        module = self.modules_by_key.get(key)
+        if not module or module["page"] is None:
+            return
+
+        refresh_method = module["refresh_method"]
+        if not refresh_method:
+            return
+
+        refresh = getattr(module["page"], refresh_method, None)
+        if callable(refresh):
+            refresh()
 
     def _filter_navigation(
         self,
@@ -412,44 +357,267 @@ class MainWindow(QMainWindow):
     def _dashboard_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(28, 28, 28, 28)
-        layout.setSpacing(16)
+        layout.setContentsMargins(28, 24, 28, 24)
+        layout.setSpacing(14)
 
-        title = QLabel("Dashboard")
+        title = QLabel("PokerLab AI Dashboard")
         title.setObjectName("PageTitle")
 
         subtitle = QLabel(
-            "PokerLab AI veri tabanı ve import özeti"
+            "Veriyi içeri aktar, adayları tara ve stratejiyi doğrula."
         )
         subtitle.setObjectName("PageSubtitle")
 
-        self.total_hands_label = QLabel("Toplam Hand: 0")
-        self.total_hands_label.setObjectName("StatLabel")
-
-        self.total_players_label = QLabel("Toplam Oyuncu: 0")
-        self.total_players_label.setObjectName("StatLabel")
-
-        self.total_actions_label = QLabel("Toplam Aksiyon: 0")
-        self.total_actions_label.setObjectName("StatLabel")
-
-        engine_label = QLabel("Motor: DuckDB")
-        engine_label.setObjectName("InfoLabel")
-
-        version_label = QLabel("Sürüm: v0.9")
-        version_label.setObjectName("InfoLabel")
-
         layout.addWidget(title)
         layout.addWidget(subtitle)
-        layout.addSpacing(12)
-        layout.addWidget(self.total_hands_label)
-        layout.addWidget(self.total_players_label)
-        layout.addWidget(self.total_actions_label)
-        layout.addSpacing(8)
-        layout.addWidget(engine_label)
-        layout.addWidget(version_label)
+
+        stats_grid = QGridLayout()
+        stats_grid.setHorizontalSpacing(12)
+        stats_grid.setVerticalSpacing(12)
+
+        self.total_hands_label = QLabel("Toplam Hand\n0")
+        self.total_hands_label.setObjectName("StatLabel")
+
+        self.total_players_label = QLabel("Toplam Oyuncu\n0")
+        self.total_players_label.setObjectName("StatLabel")
+
+        self.total_actions_label = QLabel("Toplam Aksiyon\n0")
+        self.total_actions_label.setObjectName("StatLabel")
+
+        stats_grid.addWidget(self.total_hands_label, 0, 0)
+        stats_grid.addWidget(self.total_players_label, 0, 1)
+        stats_grid.addWidget(self.total_actions_label, 0, 2)
+        stats_grid.setColumnStretch(0, 1)
+        stats_grid.setColumnStretch(1, 1)
+        stats_grid.setColumnStretch(2, 1)
+        layout.addLayout(stats_grid)
+
+        workflow_hero = QFrame()
+        workflow_hero.setObjectName("WorkflowHero")
+        hero_layout = QHBoxLayout(workflow_hero)
+        hero_layout.setContentsMargins(18, 14, 18, 14)
+        hero_layout.setSpacing(18)
+
+        hero_copy = QVBoxLayout()
+        hero_copy.setSpacing(3)
+
+        eyebrow = QLabel("ÖNERİLEN ÇALIŞMA AKIŞI")
+        eyebrow.setObjectName("WorkflowEyebrow")
+
+        hero_title = QLabel("Yeni Analiz Başlat")
+        hero_title.setObjectName("WorkflowTitle")
+
+        self.dashboard_guidance_label = QLabel(
+            "Veri hazırsa filtreli bot adaylarını tarayarak başla."
+        )
+        self.dashboard_guidance_label.setObjectName("WorkflowDescription")
+        self.dashboard_guidance_label.setWordWrap(True)
+
+        hero_copy.addWidget(eyebrow)
+        hero_copy.addWidget(hero_title)
+        hero_copy.addWidget(self.dashboard_guidance_label)
+
+        self.dashboard_primary_button = QPushButton(
+            "Bot Adayı Taramasını Başlat"
+        )
+        self.dashboard_primary_button.setObjectName("WorkflowPrimaryButton")
+        self.dashboard_primary_button.setMinimumWidth(250)
+        self.dashboard_primary_button.clicked.connect(
+            self._start_recommended_analysis
+        )
+
+        hero_layout.addLayout(hero_copy, 1)
+        hero_layout.addWidget(self.dashboard_primary_button)
+        layout.addWidget(workflow_hero)
+
+        flow_title = QLabel("Bot araştırması — 5 adım")
+        flow_title.setObjectName("DashboardSectionTitle")
+        layout.addWidget(flow_title)
+
+        flow_grid = QGridLayout()
+        flow_grid.setHorizontalSpacing(10)
+        flow_grid.setVerticalSpacing(10)
+
+        flow_steps = [
+            (
+                "1",
+                "Import",
+                "Yeni hand history dosyalarını ekle.",
+                "Veri İçe Aktar",
+                "import",
+            ),
+            (
+                "2",
+                "Bot Similarity",
+                "750+ hand ve strateji filtreleriyle aday tara.",
+                "Adayları Tara",
+                "bot_similarity",
+            ),
+            (
+                "3",
+                "Player Explorer",
+                "Kısa listedeki oyuncunun genel profilini aç.",
+                "Oyuncuyu İncele",
+                "player_explorer",
+            ),
+            (
+                "4",
+                "Bot DNA",
+                "Tekrarlanan strateji ve sizing izlerini doğrula.",
+                "DNA Analizi",
+                "bot_dna",
+            ),
+            (
+                "5",
+                "Bot Group",
+                "Doğrulanan benzer oyuncuları aynı grupta izle.",
+                "Grubu Yönet",
+                "bot_groups",
+            ),
+        ]
+
+        for column, step in enumerate(flow_steps):
+            flow_grid.addWidget(
+                self._dashboard_step_card(*step),
+                0,
+                column,
+            )
+            flow_grid.setColumnStretch(column, 1)
+
+        layout.addLayout(flow_grid)
+
+        goal_title = QLabel("Başka ne araştırmak istiyorsun?")
+        goal_title.setObjectName("DashboardSectionTitle")
+        layout.addWidget(goal_title)
+
+        goal_grid = QGridLayout()
+        goal_grid.setHorizontalSpacing(10)
+        goal_grid.setVerticalSpacing(10)
+
+        goals = [
+            (
+                "Tek Oyuncu Profili",
+                "Genel istatistikleri ve oyuncu eğilimlerini incele.",
+                "Player Explorer'ı Aç",
+                "player_explorer",
+                "blue",
+            ),
+            (
+                "Pool ve Open Size",
+                "Pozisyon bazlı büyük open ve pool tepkilerini karşılaştır.",
+                "Open Size Explorer'ı Aç",
+                "open_size",
+                "green",
+            ),
+            (
+                "Board ve Sizing",
+                "Board dokusuna göre sizing dağılımlarını araştır.",
+                "Size × Board'u Aç",
+                "size_board",
+                "purple",
+            ),
+        ]
+
+        for column, goal in enumerate(goals):
+            goal_grid.addWidget(
+                self._dashboard_goal_card(*goal),
+                0,
+                column,
+            )
+            goal_grid.setColumnStretch(column, 1)
+
+        layout.addLayout(goal_grid)
+
+        footer = QLabel(
+            "DuckDB hazır • Benzerlik tek başına bot kanıtı değildir; "
+            "adayları Player Explorer ve Bot DNA ile doğrula."
+        )
+        footer.setObjectName("InfoLabel")
+        footer.setWordWrap(True)
+
+        layout.addWidget(footer)
         layout.addStretch()
 
         return page
+
+    def _dashboard_step_card(
+        self,
+        number: str,
+        title: str,
+        description: str,
+        button_text: str,
+        target_key: str,
+    ) -> QFrame:
+        card = QFrame()
+        card.setObjectName("WorkflowStepCard")
+
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(12, 11, 12, 11)
+        card_layout.setSpacing(6)
+
+        badge = QLabel(number)
+        badge.setObjectName("WorkflowStepBadge")
+        badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        badge.setFixedSize(26, 26)
+
+        title_label = QLabel(title)
+        title_label.setObjectName("WorkflowStepTitle")
+
+        description_label = QLabel(description)
+        description_label.setObjectName("WorkflowStepDescription")
+        description_label.setWordWrap(True)
+
+        button = QPushButton(button_text)
+        button.setObjectName("WorkflowStepButton")
+        button.clicked.connect(
+            lambda _checked=False, key=target_key: self.navigate_to(key)
+        )
+
+        card_layout.addWidget(badge)
+        card_layout.addWidget(title_label)
+        card_layout.addWidget(description_label, 1)
+        card_layout.addWidget(button)
+        return card
+
+    def _dashboard_goal_card(
+        self,
+        title: str,
+        description: str,
+        button_text: str,
+        target_key: str,
+        accent: str,
+    ) -> QFrame:
+        card = QFrame()
+        card.setObjectName("DashboardGoalCard")
+        card.setProperty("accent", accent)
+
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(14, 11, 14, 11)
+        card_layout.setSpacing(5)
+
+        title_label = QLabel(title)
+        title_label.setObjectName("DashboardGoalTitle")
+
+        description_label = QLabel(description)
+        description_label.setObjectName("DashboardGoalDescription")
+        description_label.setWordWrap(True)
+
+        button = QPushButton(button_text)
+        button.setObjectName("DashboardGoalButton")
+        button.clicked.connect(
+            lambda _checked=False, key=target_key: self.navigate_to(key)
+        )
+
+        card_layout.addWidget(title_label)
+        card_layout.addWidget(description_label, 1)
+        card_layout.addWidget(button)
+        return card
+
+    def _start_recommended_analysis(self) -> None:
+        if getattr(self, "dashboard_total_hands", 0) > 0:
+            self.navigate_to("bot_similarity")
+        else:
+            self.navigate_to("import")
 
     def _import_page(self) -> QWidget:
         page = QWidget()
@@ -615,6 +783,7 @@ class MainWindow(QMainWindow):
         if not isinstance(stats, dict):
             return
 
+        phase = str(stats.get("phase") or "import")
         rate = float(stats.get("hands_per_second", 0.0) or 0.0)
         eta_seconds = max(0, int(stats.get("eta_seconds", 0) or 0))
         minutes, seconds = divmod(eta_seconds, 60)
@@ -626,9 +795,23 @@ class MainWindow(QMainWindow):
         )
         cached = int(stats.get("cached_files", 0) or 0)
         parsed = int(stats.get("parsed_hands", 0) or 0)
+        buffered = int(stats.get("buffered_hands", 0) or 0)
+        batch_target = int(stats.get("batch_target", 0) or 0)
+        write_seconds = float(stats.get("last_write_seconds", 0.0) or 0.0)
+        if phase == "write":
+            phase_text = f"DuckDB yazılıyor: {buffered:,} hand"
+        elif phase == "commit":
+            phase_text = f"Batch tamamlandı: {write_seconds:.1f} sn"
+        elif phase == "scan":
+            phase_text = "Dosyalar taranıyor"
+        elif phase == "finished":
+            phase_text = "Tamamlandı"
+        else:
+            phase_text = "Parse ediliyor"
         self.import_speed_label.setText(
-            f"Turbo Import: {rate:,.0f} hand/sn • "
+            f"Turbo Import: {phase_text} • {rate:,.0f} hand/sn • "
             f"Parse: {parsed:,} • Cache: {cached} dosya • ETA {eta_text}"
+            + (f" • Batch hedefi: {batch_target:,}" if batch_target else "")
         )
 
     def on_import_finished(
@@ -649,8 +832,8 @@ class MainWindow(QMainWindow):
         )
 
         self._refresh_dashboard()
-        self.population_page.refresh_filters()
-        self.board_explorer_page.refresh_filters()
+        self._refresh_loaded_module("population")
+        self._refresh_loaded_module("board_explorer")
 
     def on_import_failed(self, message: str) -> None:
         QMessageBox.critical(
@@ -696,19 +879,42 @@ class MainWindow(QMainWindow):
         self.import_thread = None
 
     def _refresh_dashboard(self) -> None:
-        total = f"{self.store.hand_count():,}".replace(",", ".")
-        players = f"{self.store.player_count():,}".replace(",", ".")
-        actions = f"{self.store.action_count():,}".replace(",", ".")
+        total_count = self.store.hand_count()
+        player_count = self.store.player_count()
+        action_count = self.store.action_count()
+
+        self.dashboard_total_hands = total_count
+
+        total = f"{total_count:,}".replace(",", ".")
+        players = f"{player_count:,}".replace(",", ".")
+        actions = f"{action_count:,}".replace(",", ".")
 
         self.total_hands_label.setText(
-            f"Toplam Hand: {total}"
+            f"Toplam Hand\n{total}"
         )
         self.total_players_label.setText(
-            f"Toplam Oyuncu: {players}"
+            f"Toplam Oyuncu\n{players}"
         )
         self.total_actions_label.setText(
-            f"Toplam Aksiyon: {actions}"
+            f"Toplam Aksiyon\n{actions}"
         )
+
+        if total_count > 0:
+            self.dashboard_guidance_label.setText(
+                f"{total} hand hazır. Filtreli bot adaylarını tarayarak "
+                "araştırmaya devam et."
+            )
+            self.dashboard_primary_button.setText(
+                "Bot Adayı Taramasını Başlat"
+            )
+        else:
+            self.dashboard_guidance_label.setText(
+                "Henüz analiz verisi yok. Önce hand history klasörünü seç "
+                "ve import işlemini tamamla."
+            )
+            self.dashboard_primary_button.setText(
+                "Hand History İçe Aktar"
+            )
 
 
     def _on_database_cleared(self) -> None:
@@ -800,12 +1006,99 @@ class MainWindow(QMainWindow):
             }
 
             QLabel#StatLabel {
-                font-size: 24px;
+                font-size: 19px;
                 font-weight: 700;
-                padding: 18px;
+                padding: 13px 16px;
                 background: #23262d;
                 border: 1px solid #343944;
                 border-radius: 12px;
+            }
+
+            QFrame#WorkflowHero {
+                background: #1c2540;
+                border: 1px solid #3b5ccc;
+                border-radius: 12px;
+            }
+
+            QLabel#WorkflowEyebrow {
+                color: #7dd3fc;
+                font-size: 11px;
+                font-weight: 800;
+            }
+
+            QLabel#WorkflowTitle {
+                color: #ffffff;
+                font-size: 21px;
+                font-weight: 800;
+            }
+
+            QLabel#WorkflowDescription,
+            QLabel#WorkflowStepDescription,
+            QLabel#DashboardGoalDescription {
+                color: #aeb7c6;
+                font-size: 12px;
+            }
+
+            QPushButton#WorkflowPrimaryButton {
+                background: #4264dc;
+                font-size: 14px;
+                min-height: 44px;
+            }
+
+            QLabel#DashboardSectionTitle {
+                color: #f3f4f6;
+                font-size: 16px;
+                font-weight: 750;
+                padding-top: 2px;
+            }
+
+            QFrame#WorkflowStepCard,
+            QFrame#DashboardGoalCard {
+                background: #20242c;
+                border: 1px solid #343b48;
+                border-radius: 10px;
+            }
+
+            QFrame#DashboardGoalCard[accent="blue"] {
+                border-top: 3px solid #38bdf8;
+            }
+
+            QFrame#DashboardGoalCard[accent="green"] {
+                border-top: 3px solid #34d399;
+            }
+
+            QFrame#DashboardGoalCard[accent="purple"] {
+                border-top: 3px solid #a78bfa;
+            }
+
+            QLabel#WorkflowStepBadge {
+                background: #3154c9;
+                border-radius: 13px;
+                color: #ffffff;
+                font-size: 12px;
+                font-weight: 800;
+            }
+
+            QLabel#WorkflowStepTitle,
+            QLabel#DashboardGoalTitle {
+                color: #ffffff;
+                font-size: 14px;
+                font-weight: 750;
+            }
+
+            QPushButton#WorkflowStepButton,
+            QPushButton#DashboardGoalButton {
+                background: #2b313c;
+                border: 1px solid #3d4655;
+                min-height: 32px;
+                padding: 0 9px;
+                font-size: 12px;
+            }
+
+            QPushButton#WorkflowStepButton:hover,
+            QPushButton#DashboardGoalButton:hover {
+                background: #364156;
+                border-color: #5473e8;
             }
 
             QLabel#InfoLabel {

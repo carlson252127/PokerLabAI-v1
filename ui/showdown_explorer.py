@@ -195,6 +195,10 @@ class ShowdownExplorer(QWidget):
             "W$SD",
             "0.00%",
         )
+        self.river_bet_wsd_card = self._card(
+            "River Bet WSD",
+            "0.00%",
+        )
         self.position_card = self._card(
             "En Güçlü Pozisyon",
             "—",
@@ -206,6 +210,7 @@ class ShowdownExplorer(QWidget):
             self.wwsf_card,
             self.showdown_card,
             self.wsd_card,
+            self.river_bet_wsd_card,
             self.position_card,
         ):
             cards.addWidget(card)
@@ -530,6 +535,9 @@ class ShowdownExplorer(QWidget):
         )
         self.wsd_card.value_label.setText(
             f"{float(entity.get('wsd', 0.0)):.2f}%"
+        )
+        self.river_bet_wsd_card.value_label.setText(
+            f"{float(entity.get('river_bet_wsd', 0.0)):.2f}%"
         )
         self.position_card.value_label.setText(
             str(

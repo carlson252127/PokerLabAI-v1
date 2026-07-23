@@ -1,0 +1,11 @@
+tag,start_threshold,end_threshold,color_integer,hex,rgb,ordering,status
+vpip,,,,,,,"not recoverable without unpack"
+pfr,,,,,,,"not recoverable without unpack"
+wtsd,,,,,,,"not recoverable without unpack"
+wsd,,,,,,,"not recoverable without unpack"
+steal,,,,,,,"not recoverable without unpack"
+checkRaise,,,,,,,"not recoverable without unpack"
+3Bet,,,,,,,"not recoverable without unpack"
+foldTo3Bet,,,,,,,"not recoverable without unpack"
+CBet,,,,,,,"not recoverable without unpack"
+foldToCBet,,,,,,,"not recoverable without unpack"

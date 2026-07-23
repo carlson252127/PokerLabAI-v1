@@ -604,55 +604,61 @@ class BoardExplorerWorker(QObject):
 
         action_rows = con.execute(
             f"""
+            WITH player_street AS (
+                SELECT
+                    a.hand_id,
+                    a.player_name,
+                    UPPER(TRIM(a.street)) AS street,
+                    MAX(CASE
+                        WHEN UPPER(TRIM(a.action)) IN ('BET', 'RAISE')
+                        THEN 1 ELSE 0
+                    END) AS bet_or_raise,
+                    MAX(CASE
+                        WHEN UPPER(TRIM(a.action)) = 'FOLD'
+                        THEN 1 ELSE 0
+                    END) AS folded
+                FROM actions a
+                WHERE a.hand_id IN ({placeholders})
+                  AND ({action_clause})
+                  AND UPPER(TRIM(a.street)) IN ('FLOP', 'TURN', 'RIVER')
+                GROUP BY
+                    a.hand_id,
+                    a.player_name,
+                    UPPER(TRIM(a.street))
+            )
             SELECT
-                a.street,
-                a.action,
-                COUNT(*)
-            FROM actions a
-            WHERE a.hand_id IN ({placeholders})
-              AND ({action_clause})
-            GROUP BY a.street, a.action
+                street,
+                SUM(bet_or_raise) AS made,
+                COUNT(*) AS opportunities,
+                SUM(folded) AS folds
+            FROM player_street
+            GROUP BY street
             """,
             hand_ids + action_params,
         ).fetchall()
 
         counts = {
-            (str(street), str(action)): int(count)
-            for street, action, count in action_rows
+            str(street): {
+                "made": int(made or 0),
+                "opportunities": int(opportunities or 0),
+                "folds": int(folds or 0),
+            }
+            for street, made, opportunities, folds in action_rows
         }
 
-        street_totals = {
-            street: sum(
-                count
-                for (row_street, _), count
-                in counts.items()
-                if row_street == street
-            )
-            for street in (
-                "FLOP",
-                "TURN",
-                "RIVER",
-            )
-        }
-
-        all_actions = sum(counts.values())
-        all_folds = sum(
-            count
-            for (_, action), count in counts.items()
-            if action == "FOLD"
+        all_opportunities = sum(
+            row["opportunities"] for row in counts.values()
         )
+        all_folds = sum(row["folds"] for row in counts.values())
 
         def rate(
             street: str,
-            action: str,
         ) -> float:
-            denominator = street_totals.get(
-                street,
-                0,
-            )
+            values = counts.get(street, {})
+            denominator = int(values.get("opportunities", 0))
 
             return (
-                counts.get((street, action), 0)
+                int(values.get("made", 0))
                 / denominator
                 * 100.0
                 if denominator
@@ -672,12 +678,12 @@ class BoardExplorerWorker(QObject):
 
         return {
             "hands": len(rows),
-            "flop_bet": rate("FLOP", "BET"),
-            "turn_bet": rate("TURN", "BET"),
-            "river_bet": rate("RIVER", "BET"),
+            "flop_bet": rate("FLOP"),
+            "turn_bet": rate("TURN"),
+            "river_bet": rate("RIVER"),
             "fold": (
-                all_folds / all_actions * 100.0
-                if all_actions
+                all_folds / all_opportunities * 100.0
+                if all_opportunities
                 else 0.0
             ),
             "avg_pot": (

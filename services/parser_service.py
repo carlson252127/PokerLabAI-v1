@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Optional
+from typing import Iterator, Optional
 
 from services.position_service import calculate_positions
 
@@ -12,6 +12,12 @@ class ParserService:
     SITE_GGPOKER = "GGPoker"
     SITE_COINPOKER = "CoinPoker"
     SITE_UNKNOWN = "Unknown"
+
+    _TEXT_HAND_HEADER = re.compile(
+        r"^(?:(?:PokerStars(?: Zoom)?|GGPoker|GGNetwork|CoinPoker)\s+"
+        r"(?:Hand|Game)|Poker\s+Hand)\s+#",
+        re.IGNORECASE,
+    )
 
     def detect_site(self, content: str) -> str:
         sample = content[:50000]
@@ -80,6 +86,48 @@ class ParserService:
                 parsed_hands.append(parsed)
 
         return parsed_hands
+
+    def iter_file(self, file_path: str | Path) -> Iterator[dict]:
+        """Yield parsed hands without retaining a whole text export in memory.
+
+        Legacy CoinPoker XML does not have reliable line-delimited hand
+        boundaries, so it intentionally uses the established parser fallback.
+        """
+        path = Path(file_path)
+        try:
+            with path.open("r", encoding="utf-8", errors="ignore") as source:
+                sample = source.read(50_000)
+                site = self.detect_site(sample)
+                is_xml = site == self.SITE_COINPOKER and "<game" in sample.lower()
+                source.seek(0)
+                if site == self.SITE_UNKNOWN or is_xml:
+                    for parsed in self.parse_file(path):
+                        yield parsed
+                    return
+
+                lines: list[str] = []
+                for line in source:
+                    if self._TEXT_HAND_HEADER.match(line.strip()) and lines:
+                        parsed = self.parse_hand(
+                            raw_hand="".join(lines),
+                            site=site,
+                            source_file=str(path),
+                        )
+                        if parsed and parsed.get("hand", {}).get("hand_id"):
+                            yield parsed
+                        lines = []
+                    lines.append(line)
+
+                if lines:
+                    parsed = self.parse_hand(
+                        raw_hand="".join(lines),
+                        site=site,
+                        source_file=str(path),
+                    )
+                    if parsed and parsed.get("hand", {}).get("hand_id"):
+                        yield parsed
+        except OSError:
+            return
 
     def split_hands(
         self,

@@ -8,6 +8,8 @@ from typing import Any
 
 import duckdb
 
+from services.poker_statistics import SHOWDOWN_ACTIONS, WIN_ACTIONS, sql_values
+
 
 class OpenSizeAnalysisService:
     POSITION_ORDER = ["UTG", "UTG+1", "HJ", "CO", "BTN", "SB", "BB", "OTHER"]
@@ -204,6 +206,8 @@ class OpenSizeAnalysisService:
 
         where_sql = "WHERE " + " AND ".join(f"({c})" for c in clauses) if clauses else ""
 
+        win_values = sql_values(WIN_ACTIONS)
+        showdown_values = sql_values(SHOWDOWN_ACTIONS)
         query = f"""
             WITH preflop_raises AS (
                 SELECT
@@ -439,7 +443,7 @@ class OpenSizeAnalysisService:
                     WHERE c.hand_id = o.hand_id
                       AND LOWER(TRIM(c.player_name)) =
                           LOWER(TRIM(o.opener))
-                      AND UPPER(TRIM(c.action)) = 'COLLECT'
+                      AND UPPER(TRIM(c.action)) IN ({win_values})
                 ) AS won_pot,
                 EXISTS (
                     SELECT 1
@@ -447,7 +451,7 @@ class OpenSizeAnalysisService:
                     WHERE s.hand_id = o.hand_id
                       AND LOWER(TRIM(s.player_name)) =
                           LOWER(TRIM(o.opener))
-                      AND UPPER(TRIM(s.action)) IN ('SHOW', 'MUCK')
+                      AND UPPER(TRIM(s.action)) IN ({showdown_values})
                 ) AS went_showdown
             FROM opens o
             LEFT JOIN preflop_response pr ON pr.hand_id = o.hand_id
