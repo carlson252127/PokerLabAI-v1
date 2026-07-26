@@ -6,6 +6,7 @@ import tempfile
 import unittest
 
 from services.open_size_rng_analysis_service import OpenSizeRngAnalysisService
+from services.open_size_rng_model_validation import ComparableOpenSizeModels
 
 
 def record(
@@ -35,6 +36,47 @@ def record(
 
 
 class OpenSizeRngAnalysisTests(unittest.TestCase):
+    def test_comparable_models_share_target_sample_folds_and_weighting(self) -> None:
+        rows = [
+            OpenSizeRngAnalysisService._normalize(
+                record(
+                    i,
+                    (2.5, 3.0, 3.5, 4.0)[i % 4],
+                    player=f"bot-{i % 6}",
+                    session=f"session-{i // 20}",
+                )
+            )
+            for i in range(300)
+        ]
+        result = ComparableOpenSizeModels.evaluate(
+            rows,
+            bootstrap_iterations=20,
+            permutation_iterations=5,
+        )
+        self.assertTrue(result["same_sample"])
+        self.assertTrue(result["same_folds"])
+        self.assertTrue(result["same_weighting"])
+        samples = {row["records"] for row in result["metrics"]}
+        targets = {row["target_classes"] for row in result["metrics"]}
+        self.assertEqual(len(samples), 1)
+        self.assertEqual(len(targets), 1)
+
+    def test_player_and_session_groups_do_not_cross_folds(self) -> None:
+        rows = [
+            OpenSizeRngAnalysisService._normalize(
+                record(
+                    i,
+                    4.0 if i % 2 else 2.5,
+                    player=f"bot-{i % 5}",
+                    session=f"session-{i // 10}",
+                )
+            )
+            for i in range(200)
+        ]
+        for mode in ("session", "player"):
+            fold_map = ComparableOpenSizeModels._fold_map(rows, 5, mode)
+            ComparableOpenSizeModels.assert_no_leakage(rows, fold_map, mode)
+
     def test_independent_fixed_mixture_is_rng_leaning(self) -> None:
         rng = random.Random(20260726)
         rows = [
@@ -151,6 +193,8 @@ class OpenSizeRngAnalysisTests(unittest.TestCase):
                 "open_size_rng_condition_effects.csv",
                 "open_size_rng_transitions.csv",
                 "open_size_rng_model_metrics.csv",
+                "open_size_rng_player_share.csv",
+                "open_size_rng_session_stability.csv",
             }
             self.assertEqual(expected, {p.name for p in Path(directory).iterdir()})
 
