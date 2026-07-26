@@ -9,6 +9,7 @@ import duckdb
 import pyarrow as pa
 
 from services.response_node_schema import ensure_response_node_schema
+from services.response_comparison_service import ResponseComparisonService
 
 
 class AnalyticalStore:
@@ -507,10 +508,11 @@ class AnalyticalStore:
             players_rows: list[dict] = []
             actions_rows: list[dict] = []
             response_rows: list[dict] = []
+            response_builder = ResponseComparisonService(self.database_path)
             for hand_id in new_ids:
                 item = unique_items[hand_id]
                 response_rows.extend(
-                    self._response_node_rows(item, hand_id)
+                    response_builder.build_parsed_hand_nodes(item, hand_id)
                 )
                 for row in item.get("players", []):
                     players_rows.append({
@@ -562,15 +564,15 @@ class AnalyticalStore:
             ]
             if indexed_hand_rows:
                 db.register(
-                    "incoming_response_indexed_hands",
+                    "incoming_response_v4_indexed_hands",
                     pa.Table.from_pylist(indexed_hand_rows),
                 )
-                registered_tables.append("incoming_response_indexed_hands")
+                registered_tables.append("incoming_response_v4_indexed_hands")
                 db.execute(
                     """
-                    INSERT INTO response_node_indexed_hands
+                    INSERT INTO response_node_v4_indexed_hands
                     SELECT hand_id
-                    FROM incoming_response_indexed_hands
+                    FROM incoming_response_v4_indexed_hands
                     ON CONFLICT (hand_id) DO NOTHING
                     """
                 )
@@ -584,11 +586,15 @@ class AnalyticalStore:
                 db.execute(
                     """
                     INSERT INTO response_nodes (
-                        hand_id, player_name, position, site, stakes,
-                        node, response, board_family
+                        hand_id, aggressor, responder,
+                        aggressor_position, responder_position,
+                        site, stakes, node, street, response,
+                        board_family, open_bucket, bet_bucket
                     )
-                    SELECT hand_id, player_name, position, site, stakes,
-                           node, response, board_family
+                    SELECT hand_id, aggressor, responder,
+                           aggressor_position, responder_position,
+                           site, stakes, node, street, response,
+                           board_family, open_bucket, bet_bucket
                     FROM incoming_response_nodes
                     """
                 )

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from typing import Any
+import threading
+import time
 
 from PySide6.QtCore import QObject, QThread, Signal, Slot, Qt, QTimer
 from PySide6.QtWidgets import (
     QComboBox, QFrame, QGridLayout, QHeaderView, QLabel,
-    QMessageBox, QPushButton, QSpinBox, QTableWidget,
+    QMessageBox, QPushButton, QProgressBar, QSpinBox, QTableWidget,
     QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
@@ -15,18 +17,29 @@ from services.response_comparison_service import ResponseComparisonService
 class ResponseComparisonWorker(QObject):
     finished = Signal(dict)
     failed = Signal(str)
+    progress = Signal(dict)
 
     def __init__(self, database_path: str, arguments: dict[str, Any]) -> None:
         super().__init__()
         self.service = ResponseComparisonService(database_path)
         self.arguments = arguments
+        self._cancel_event = threading.Event()
 
     @Slot()
     def run(self) -> None:
         try:
-            self.finished.emit(self.service.analyze(**self.arguments))
+            self.finished.emit(
+                self.service.analyze(
+                    **self.arguments,
+                    progress_callback=self.progress.emit,
+                    should_cancel=self._cancel_event.is_set,
+                )
+            )
         except Exception as exc:
             self.failed.emit(f"{type(exc).__name__}: {exc}")
+
+    def cancel(self) -> None:
+        self._cancel_event.set()
 
 
 class ResponseComparisonExplorer(QWidget):
@@ -49,6 +62,7 @@ class ResponseComparisonExplorer(QWidget):
         self.service = ResponseComparisonService(database_path)
         self.worker_thread: QThread | None = None
         self.worker: ResponseComparisonWorker | None = None
+        self._analysis_started_at = 0.0
         self._build_ui()
         QTimer.singleShot(100, self.refresh_filters)
 
@@ -104,6 +118,10 @@ class ResponseComparisonExplorer(QWidget):
         self.analyze_button = QPushButton("Bot vs Pool Karşılaştır")
         self.analyze_button.clicked.connect(self.run_analysis)
         grid.addWidget(self.analyze_button, 1, len(widgets))
+        self.cancel_button = QPushButton("Durdur")
+        self.cancel_button.setEnabled(False)
+        self.cancel_button.clicked.connect(self.cancel_analysis)
+        grid.addWidget(self.cancel_button, 1, len(widgets) + 1)
         root.addWidget(filters)
 
         self.summary_label = QLabel("Filtreleri seçip analizi başlat.")
@@ -114,6 +132,11 @@ class ResponseComparisonExplorer(QWidget):
         self.status_label = QLabel("")
         self.status_label.setObjectName("PageSubtitle")
         root.addWidget(self.status_label)
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 1000)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setFormat("%p%")
+        root.addWidget(self.progress_bar)
 
         self.table = QTableWidget(0, len(self.COLUMNS))
         self.table.setHorizontalHeaderLabels([label for _key, label in self.COLUMNS])
@@ -196,6 +219,9 @@ class ResponseComparisonExplorer(QWidget):
             "minimum_sample": int(self.minimum_sample.value()),
         }
         self.analyze_button.setEnabled(False)
+        self.cancel_button.setEnabled(True)
+        self._analysis_started_at = time.monotonic()
+        self.progress_bar.setValue(0)
         self.status_label.setText(
             "Eksik eller küçük paketlerle indeksleniyor; ardından karşılaştırma yapılacak…"
         )
@@ -205,10 +231,54 @@ class ResponseComparisonExplorer(QWidget):
         self.worker_thread.started.connect(self.worker.run)
         self.worker.finished.connect(self._analysis_finished)
         self.worker.failed.connect(self._analysis_failed)
+        self.worker.progress.connect(self._analysis_progress)
         self.worker.finished.connect(self.worker_thread.quit)
         self.worker.failed.connect(self.worker_thread.quit)
         self.worker_thread.finished.connect(self._cleanup_worker)
         self.worker_thread.start()
+
+    def cancel_analysis(self) -> None:
+        if self.worker is None:
+            return
+        self.worker.cancel()
+        self.cancel_button.setEnabled(False)
+        self.status_label.setText(
+            "Durdurma isteği alındı; aktif batch güvenle tamamlanıyor…"
+        )
+
+    @Slot(dict)
+    def _analysis_progress(self, progress: dict[str, Any]) -> None:
+        phase = str(progress.get("phase") or "index")
+        if phase == "comparison":
+            self.progress_bar.setValue(1000)
+            self.status_label.setText(
+                "İndeks hazır; bot/pool karşılaştırması yapılıyor…"
+            )
+            return
+
+        completed = int(progress.get("completed", 0) or 0)
+        pending = int(progress.get("pending", 0) or 0)
+        indexed = int(progress.get("indexed", 0) or 0)
+        added_nodes = int(progress.get("added_nodes", 0) or 0)
+        fraction = completed / pending if pending else 1.0
+        self.progress_bar.setValue(min(1000, int(fraction * 1000)))
+
+        elapsed = max(0.001, time.monotonic() - self._analysis_started_at)
+        rate = completed / elapsed
+        remaining = max(0, pending - completed)
+        eta_seconds = int(remaining / rate) if rate > 0 else 0
+        eta_minutes, eta_remainder = divmod(eta_seconds, 60)
+        eta_hours, eta_minutes = divmod(eta_minutes, 60)
+        eta_text = (
+            f"{eta_hours:02d}:{eta_minutes:02d}:{eta_remainder:02d}"
+            if eta_hours
+            else f"{eta_minutes:02d}:{eta_remainder:02d}"
+        )
+        self.status_label.setText(
+            f"Bu çalışmada {completed:,}/{pending:,} el • "
+            f"toplam indeks {indexed:,} • {rate:,.0f} el/sn • "
+            f"+{added_nodes:,} node • ETA {eta_text}"
+        )
 
     @Slot(dict)
     def _analysis_finished(self, result: dict[str, Any]) -> None:
@@ -248,10 +318,12 @@ class ResponseComparisonExplorer(QWidget):
             f"+{index.get('added_nodes', 0):,} node"
         )
         self.analyze_button.setEnabled(True)
+        self.cancel_button.setEnabled(False)
 
     @Slot(str)
     def _analysis_failed(self, message: str) -> None:
         self.analyze_button.setEnabled(True)
+        self.cancel_button.setEnabled(False)
         self.status_label.setText("Analiz başarısız.")
         QMessageBox.critical(self, "Response Comparison Hatası", message)
 

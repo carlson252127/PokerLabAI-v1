@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 import math
 import os
 import re
@@ -139,27 +139,72 @@ class ResponseComparisonService:
             )
         return {"total": total, "indexed": indexed, "pending": max(0, total - indexed), "nodes": nodes}
 
-    def ensure_index(self) -> dict[str, int]:
+    def ensure_index(
+        self,
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
+        should_cancel: Callable[[], bool] | None = None,
+    ) -> dict[str, Any]:
         """Index all missing hands using small, transaction-safe batches."""
         with self.connect() as con:
             self._ensure_tables(con)
             added_hands = 0
             added_nodes = 0
+            cancelled = False
 
-            while True:
+            total = int(con.execute("SELECT COUNT(*) FROM hands").fetchone()[0])
+            indexed_at_start = int(
+                con.execute(
+                    "SELECT COUNT(*) FROM response_node_v4_indexed_hands"
+                ).fetchone()[0]
+            )
+
+            # Materialize the missing set once.  The previous implementation
+            # reran the full hands/marker ANTI JOIN for every 5,000-hand batch.
+            # On multi-million-hand databases that changed a linear backfill
+            # into thousands of repeated full-table discovery scans.
+            con.execute(
+                f"""
+                CREATE OR REPLACE TEMP TABLE response_v4_pending AS
+                SELECT
+                    ROW_NUMBER() OVER () AS pending_row,
+                    h.hand_id
+                FROM hands h
+                ANTI JOIN response_node_v4_indexed_hands i USING (hand_id)
+                """
+            )
+            pending = int(
+                con.execute(
+                    "SELECT COUNT(*) FROM response_v4_pending"
+                ).fetchone()[0]
+            )
+            if progress_callback is not None:
+                progress_callback({
+                    "phase": "index",
+                    "completed": 0,
+                    "pending": pending,
+                    "total": total,
+                    "indexed": indexed_at_start,
+                    "added_nodes": 0,
+                })
+
+            for start_row in range(1, pending + 1, self.batch_size):
+                if should_cancel is not None and should_cancel():
+                    cancelled = True
+                    break
                 ids = [
                     str(row[0])
                     for row in con.execute(
-                        f"""
-                        SELECT h.hand_id
-                        FROM hands h
-                        ANTI JOIN response_node_v4_indexed_hands i USING (hand_id)
-                        LIMIT {int(self.batch_size)}
                         """
+                        SELECT hand_id
+                        FROM response_v4_pending
+                        WHERE pending_row BETWEEN ? AND ?
+                        ORDER BY pending_row
+                        """,
+                        [start_row, start_row + self.batch_size - 1],
                     ).fetchall()
                 ]
                 if not ids:
-                    break
+                    continue
 
                 id_table = pa.Table.from_pylist([{"hand_id": value} for value in ids])
                 con.register("response_batch_ids", id_table)
@@ -225,12 +270,15 @@ class ResponseComparisonService:
                     )
 
                 con.execute("BEGIN TRANSACTION")
+                incoming_nodes_registered = False
+                indexed_batch_registered = False
                 try:
                     if node_rows:
                         con.register(
                             "incoming_response_nodes",
                             pa.Table.from_pylist(node_rows),
                         )
+                        incoming_nodes_registered = True
                         con.execute(
                             """
                             INSERT INTO response_nodes (
@@ -246,11 +294,11 @@ class ResponseComparisonService:
                             FROM incoming_response_nodes
                             """
                         )
-                        con.unregister("incoming_response_nodes")
                     con.register(
                         "indexed_response_batch",
                         pa.Table.from_pylist([{"hand_id": value} for value in ids]),
                     )
+                    indexed_batch_registered = True
                     con.execute(
                         """
                         INSERT INTO response_node_v4_indexed_hands
@@ -258,16 +306,52 @@ class ResponseComparisonService:
                         ON CONFLICT (hand_id) DO NOTHING
                         """
                     )
-                    con.unregister("indexed_response_batch")
                     con.execute("COMMIT")
                 except Exception:
                     con.execute("ROLLBACK")
                     raise
+                finally:
+                    if indexed_batch_registered:
+                        con.unregister("indexed_response_batch")
+                    if incoming_nodes_registered:
+                        con.unregister("incoming_response_nodes")
 
                 added_hands += len(ids)
                 added_nodes += len(node_rows)
+                if progress_callback is not None:
+                    progress_callback({
+                        "phase": "index",
+                        "completed": added_hands,
+                        "pending": pending,
+                        "total": total,
+                        "indexed": indexed_at_start + added_hands,
+                        "added_nodes": added_nodes,
+                    })
 
-            status = self.index_status()
+                # Drop batch-sized Python/Arrow references before the next
+                # extraction so adjacent batches do not overlap in memory.
+                del id_table, hands, positions, actions, node_rows, ids
+
+            indexed = int(
+                con.execute(
+                    "SELECT COUNT(*) FROM response_node_v4_indexed_hands"
+                ).fetchone()[0]
+            )
+            nodes = int(
+                con.execute(
+                    """
+                    SELECT COUNT(*) FROM response_nodes
+                    WHERE aggressor IS NOT NULL
+                    """
+                ).fetchone()[0]
+            )
+            status: dict[str, Any] = {
+                "total": total,
+                "indexed": indexed,
+                "pending": max(0, total - indexed),
+                "nodes": nodes,
+                "cancelled": cancelled,
+            }
             status["added_hands"] = added_hands
             status["added_nodes"] = added_nodes
             return status
@@ -280,13 +364,35 @@ class ResponseComparisonService:
         stakes: str = "",
         position: str = "",
         minimum_sample: int = 50,
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
+        should_cancel: Callable[[], bool] | None = None,
     ) -> dict[str, Any]:
         if not bot_group:
             raise ValueError("Bot group seçilmedi.")
         if node not in self.NODE_LABELS:
             raise ValueError(f"Desteklenmeyen node: {node}")
 
-        index_info = self.ensure_index()
+        index_info = self.ensure_index(progress_callback, should_cancel)
+        if index_info.get("cancelled"):
+            return {
+                "rows": [],
+                "bot_group": bot_group,
+                "node": node,
+                "count": 0,
+                "positive_edges": 0,
+                "negative_edges": 0,
+                "summary": "İndeksleme kullanıcı tarafından durduruldu; sonraki çalıştırma kaldığı yerden devam eder.",
+                "index": index_info,
+            }
+        if progress_callback is not None:
+            progress_callback({
+                "phase": "comparison",
+                "completed": index_info["indexed"],
+                "pending": index_info["pending"],
+                "total": index_info["total"],
+                "indexed": index_info["indexed"],
+                "added_nodes": index_info["added_nodes"],
+            })
         minimum_sample = max(1, int(minimum_sample))
 
         filters = ["rn.node = ?"]
@@ -491,6 +597,51 @@ class ResponseComparisonService:
                     pot += max(0.0, action["amount"])
 
         return rows
+
+    def build_parsed_hand_nodes(
+        self,
+        item: dict[str, Any],
+        hand_id: str,
+    ) -> list[dict[str, Any]]:
+        """Build canonical V4 rows directly from an import parser item."""
+        hand = item.get("hand", item)
+        positions = {
+            self._key(row.get("player_name") or row.get("name")):
+            str(row.get("position") or "?")
+            for row in item.get("players", [])
+        }
+        actions = [
+            {
+                "sequence": int(
+                    row.get("sequence_no")
+                    if row.get("sequence_no") is not None
+                    else row.get("action_order") or 0
+                ),
+                "street": str(row.get("street") or "").upper().strip(),
+                "player": str(
+                    row.get("player_name") or row.get("player") or ""
+                ),
+                "action": str(
+                    row.get("action") or row.get("action_type") or ""
+                ).upper().strip(),
+                "amount": float(row.get("amount") or 0),
+                "to_amount": float(row.get("to_amount") or 0),
+            }
+            for row in item.get("actions", [])
+        ]
+        actions.sort(key=lambda row: row["sequence"])
+        return self._build_hand_nodes(
+            hand_id,
+            {
+                "site": hand.get("site"),
+                "stakes": hand.get("stakes"),
+                "flop": hand.get("flop"),
+                "turn": hand.get("turn"),
+                "river": hand.get("river"),
+            },
+            positions,
+            actions,
+        )
 
     @staticmethod
     def _record_history(history: dict[str, list[str]], action: dict[str, Any]) -> None:
