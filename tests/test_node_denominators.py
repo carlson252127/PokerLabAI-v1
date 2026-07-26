@@ -204,7 +204,23 @@ class DecisionOpportunityTests(unittest.TestCase):
         )
         self.assertEqual((frequency.action_count, frequency.opportunities), (1, 1))
 
-    def test_multiway_is_excluded_by_default_and_marked_when_included(self) -> None:
+    def test_decision_type_rejects_incompatible_legal_actions(self) -> None:
+        with self.assertRaisesRegex(
+            ValueError, "CHECK_OR_BET requires available_actions"
+        ):
+            DecisionOpportunity(
+                hand_id="h-invalid-actions",
+                player_id="Alice",
+                street="FLOP",
+                decision_index=0,
+                node_key="node",
+                decision_type="CHECK_OR_BET",
+                facing_action="NONE",
+                available_actions=("CHECK", "BET", "FOLD"),
+                chosen_action="CHECK",
+            )
+
+    def test_multiway_can_be_excluded_or_aggregated_explicitly(self) -> None:
         rows = [
             action(1, "Alice", "BET"),
             action(2, "Bob", "CALL"),
@@ -212,6 +228,7 @@ class DecisionOpportunityTests(unittest.TestCase):
         excluded = self.build(
             rows,
             players=("Alice", "Bob", "Carol"),
+            include_multiway=False,
         )
         self.assertEqual(excluded.opportunities, ())
         self.assertTrue(any("multiway" in text for text in excluded.warnings))
@@ -224,14 +241,14 @@ class DecisionOpportunityTests(unittest.TestCase):
         self.assertTrue(included.opportunities)
         self.assertTrue(
             all(
-                row.is_multiway and not row.is_valid
+                row.is_multiway and row.is_valid
                 for row in included.opportunities
             )
         )
         aggregate = self.service.aggregate_action(
             included.opportunities, "BET"
         )
-        self.assertEqual(aggregate.opportunities, 0)
+        self.assertEqual(aggregate.opportunities, 1)
 
     def test_raise_to_and_raise_by_are_not_confused(self) -> None:
         result = self.build(

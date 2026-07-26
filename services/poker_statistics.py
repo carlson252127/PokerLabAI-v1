@@ -29,7 +29,10 @@ NON_DECISION_ACTIONS = frozenset(
         "RETURN",
         "WIN",
         "DEAL",
+        "DEALT",
         "STREET_MARKER",
+        "UNCALLED_BET_RETURN",
+        "SIT_OUT",
     }
 )
 
