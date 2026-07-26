@@ -196,7 +196,13 @@ class OpenSizeRngAnalysisService:
                        SELECT COUNT(*)
                        FROM hand_players dealt
                        WHERE dealt.hand_id = h.hand_id
-                   ) AS players_dealt
+                   ) AS players_dealt,
+                   EXISTS (
+                       SELECT 1
+                       FROM actions ante_action
+                       WHERE ante_action.hand_id = h.hand_id
+                         AND UPPER(TRIM(ante_action.action)) = 'POST_ANTE'
+                   ) AS has_ante
             FROM candidates c
             JOIN hands h USING (hand_id)
             JOIN hand_players hp
@@ -233,7 +239,7 @@ class OpenSizeRngAnalysisService:
                         "table_id": row[2], "site": row[3], "stake": row[4],
                         "player": row[5], "position": row[6],
                         "effective_stack_bb": stack, "open_size_bb": size,
-                        "players_dealt": row[9],
+                        "players_dealt": row[9], "ante": bool(row[10]),
                     }
 
     @classmethod
@@ -246,6 +252,14 @@ class OpenSizeRngAnalysisService:
         cls._write_csv(output / "open_size_rng_condition_effects.csv", report.condition_effects)
         cls._write_csv(output / "open_size_rng_transitions.csv", report.transitions)
         cls._write_csv(output / "open_size_rng_model_metrics.csv", report.model_metrics)
+        cls._write_csv(
+            output / "open_size_rng_player_share.csv",
+            report.player_shares,
+        )
+        cls._write_csv(
+            output / "open_size_rng_session_stability.csv",
+            [report.session_stability],
+        )
         strongest = report.condition_effects[:5]
         lines = [
             "# Bot Open Size RNG / Strateji Analizi", "",
